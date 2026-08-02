@@ -1,0 +1,95 @@
+{
+  "id": "chatgpt-web",
+  "name": "ChatGPT Web Backup Provider",
+  "description": "Experimental browser-backed ChatGPT provider intended only for fallback use",
+  "activation": {
+    "onStartup": false
+  },
+  "enabledByDefault": false,
+  "providers": [
+    "chatgpt-web"
+  ],
+  "autoEnableWhenConfiguredProviders": [
+    "chatgpt-web"
+  ],
+  "nonSecretAuthMarkers": [
+    "chatgpt-web-local"
+  ],
+  "syntheticAuthRefs": [
+    "chatgpt-web"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "webchatUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "mode": {
+        "type": "string",
+        "enum": [
+          "launch",
+          "cdp"
+        ]
+      },
+      "profileDir": {
+        "type": "string"
+      },
+      "cdpUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "executablePath": {
+        "type": "string"
+      },
+      "headless": {
+        "type": "boolean"
+      },
+      "acknowledgeDataEgress": {
+        "type": "boolean"
+      },
+      "maxPromptChars": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 200000
+      },
+      "readyTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 300000
+      },
+      "responseTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 900000
+      },
+      "stabilityWindowMs": {
+        "type": "integer",
+        "minimum": 250,
+        "maximum": 30000
+      },
+      "selectors": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "composer": {
+            "type": "string"
+          },
+          "send": {
+            "type": "string"
+          },
+          "assistant": {
+            "type": "string"
+          },
+          "responseContent": {
+            "type": "string"
+          },
+          "stop": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

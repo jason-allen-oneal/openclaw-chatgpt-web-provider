@@ -100,7 +100,8 @@ README is a technical warning, not legal advice or a compliance determination.
   browser profiles.
 - Launch mode isolates the provider's Chromium profile and creates a fresh
   provider-owned page per turn. CDP mode cannot prove the attached browser's
-  profile ownership. Use CDP only with a browser dedicated to this provider.
+  profile ownership, and CDP cleanup can close the entire attached Chromium
+  process. Use CDP only with a browser dedicated to this provider.
 - The provider checks the configured ChatGPT origin and rejects unexpected
   top-level navigation, popups, downloads, and transcript mismatches. Those
   checks are not a complete browser sandbox or network allowlist.
@@ -131,9 +132,11 @@ The provider also:
 - fails closed until `acknowledgeDataEgress` is true;
 - enforces `maxPromptChars` before filling the composer;
 - cancels and closes the active provider-owned page;
-- rejects unexpected top-level navigation, popups, and downloads; and
+- in CDP mode, cleanup may also close the attached Chromium process, so the CDP
+  browser must be dedicated to this provider;
+- rejects unexpected top-level navigation, popups, and downloads;
 - uses typed failures for authentication, timeout, integrity, browser, and
-  response errors so OpenClaw can classify fallback behavior.
+  response errors so OpenClaw can classify fallback behavior; and
 - validates browser-requested tool names and arguments against the live
   OpenClaw tool catalog before emitting native tool-call events.
 
@@ -152,11 +155,16 @@ browser prompt. If ChatGPT needs one, it must return exactly one line such as:
 OPENCLAW_TOOL_CALL {"name":"read_file","arguments":{"path":"README.md"}}
 ```
 
-The provider rejects malformed JSON, unknown tool names, invalid arguments, or
-extra prose around the marker. Valid calls become OpenClaw `toolCall` content
-and `toolcall_start`/`toolcall_delta`/`toolcall_end` events. OpenClaw then runs
-the normal tool policy, approval, execution, and result loop. The browser
-adapter has no direct file, shell, messaging, or other tool implementation.
+The marker is reserved for this protocol. If it appears anywhere in a browser
+response, the response must consist of the marker and exactly one JSON object,
+with no leading or trailing prose. The provider rejects malformed JSON,
+unknown tool names, or arguments that fail the pinned OpenClaw 2026.7.1
+validator. The SDK validator's coercion behavior is inherited; this boundary
+is not a substitute for strict application-level type checks. Valid calls
+become OpenClaw `toolCall` content and
+`toolcall_start`/`toolcall_delta`/`toolcall_end` events. OpenClaw then runs the
+normal tool policy, approval, execution, and result loop. The browser adapter
+has no direct file, shell, messaging, or other tool implementation.
 
 The browser transport requests at most one tool per turn. That preserves the
 provider's serialized full-context boundary; repeated tool use is handled by
@@ -243,6 +251,21 @@ fails before the prompt is submitted. The adapter returns final text only: it
 does not expose or invent hidden chain-of-thought blocks. The default `backup`
 model does not advertise reasoning until it is explicitly configured with
 reviewed web labels and selectors.
+
+The model example above is a `config` fragment. To enable browser selection,
+add deployment-specific selectors at the same level; these placeholders are
+deliberately not usable until they are reviewed against the current DOM:
+
+```json
+{
+  "selectors": {
+    "modelPicker": "<model-picker-selector>",
+    "modelOption": "<model-option-selector>",
+    "reasoningPicker": "<reasoning-picker-selector>",
+    "reasoningOption": "<reasoning-option-selector>"
+  }
+}
+```
 
 Use the selected model in the normal OpenClaw model setting, for example
 `chatgpt-web/gpt-5`, and use the normal OpenClaw thinking control such as
@@ -331,10 +354,10 @@ npm run pack:check
 npm audit --omit=dev
 ```
 
-The current validation snapshot passed 78 tests, typecheck, build, package
-inspection, production dependency audit, contained firewall checks, and an
-isolated OpenClaw 2026.7.1 install. No external ChatGPT turn is implied by
-those checks.
+The current validation snapshot passed 79 tests, typecheck, build, package
+inspection, manifest validation, production dependency audit, and diff checks.
+It did not include a contained canary, a live OpenClaw installation, or an
+external ChatGPT turn.
 
 Do not install this package into a live OpenClaw runtime, edit live OpenClaw
 configuration, or restart a live gateway as part of ordinary development.

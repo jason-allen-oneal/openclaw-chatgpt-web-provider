@@ -198,6 +198,27 @@ describe("createChatGptWebStreamFn", () => {
     );
   });
 
+  it("rejects leading prose before a browser tool marker", async () => {
+    const stream = await createChatGptWebStreamFn({
+      client: {
+        ask: vi.fn().mockResolvedValue(
+          'I will use a tool.\nOPENCLAW_TOOL_CALL {"name":"read_file","arguments":{"path":"README.md"}}',
+        ),
+      },
+      maxPromptChars: 100_000,
+    })(model, {
+      tools: [readFileTool],
+      messages: [{ role: "user", content: "Do the task.", timestamp: 1 }],
+    });
+    const events = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.map((event) => event.type)).toEqual(["start", "error"]);
+    expect((await stream.result()).errorMessage).toMatch(
+      /tool-call marker must be at the beginning/,
+    );
+  });
+
   it("returns a protocol error when the browser request fails", async () => {
     const client: ChatGptWebClient = {
       ask: vi.fn().mockRejectedValue(new Error("browser unavailable")),

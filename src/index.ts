@@ -31,7 +31,7 @@ const CHATGPT_WEB_CATALOG_API = "openai-completions";
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: CHATGPT_WEB_PROVIDER_ID,
   name: "ChatGPT Web Backup Provider",
-  description: "Private native-headless ChatGPT fallback provider pinned to OpenClaw 2026.7.1",
+  description: "Native-headless ChatGPT fallback provider pinned to OpenClaw 2026.7.1",
   register(api: OpenClawPluginApi) {
     const config = resolveChatGptWebConfig(api.pluginConfig);
     const browserClient = new PlaywrightChatGptWebClient(config, api.logger);
@@ -113,7 +113,10 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       buildReplayPolicy: () => ({
         dropThinkingBlocks: true,
       }),
-      normalizeToolSchemas: () => [],
+      // Keep OpenClaw's live tool catalog intact. The browser model only
+      // proposes a validated call; OpenClaw remains responsible for policy,
+      // approval, and execution of the actual tool.
+      normalizeToolSchemas: ({ tools }) => tools,
       resolveReasoningOutputMode: () => "native",
       matchesContextOverflowError: ({ errorMessage }) =>
         /serialized fallback prompt .* configured maximum/i.test(errorMessage),

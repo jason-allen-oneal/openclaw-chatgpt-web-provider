@@ -2,7 +2,7 @@
 
 This repository contains a browser-backed fallback provider for OpenClaw. It
 uses a dedicated Chromium profile and the ChatGPT web application to answer a
-text-only turn when the normal provider is unavailable.
+text or native OpenClaw tool-call turn when the normal provider is unavailable.
 
 Model reference:
 
@@ -21,12 +21,15 @@ Enabling this provider can send the following to a third-party ChatGPT account:
 - the OpenClaw system prompt;
 - conversation history;
 - user and assistant text; and
+- available tool names, descriptions, and JSON schemas;
+- prior tool-call arguments; and
 - prior tool-result text.
 
-Tool-call arguments, hidden reasoning blocks, and image bytes are omitted, but
-the omitted categories do not make the remaining context safe by default. Do
-not use this with credentials, client data, regulated data, private URLs,
-secrets, or workflows where an unexpected data export would be unacceptable.
+Hidden reasoning blocks and image bytes are omitted, but that does not make the
+remaining context safe by default. Tool arguments can contain file paths,
+message content, URLs, or other sensitive values. Do not use this with
+credentials, client data, regulated data, private URLs, secrets, or workflows
+where an unexpected data export would be unacceptable.
 
 The provider requires an explicit `acknowledgeDataEgress: true` setting. That
 setting is an acknowledgement, not a privacy guarantee and not an approval from
@@ -61,8 +64,12 @@ README is a technical warning, not legal advice or a compliance determination.
   extraction, or receipt validation without a code change here.
 - Responses are buffered pseudo-streams. OpenClaw receives text after the DOM
   reports a positive completion state, not token-by-token API streaming.
-- There are no native tool calls, structured outputs, authoritative usage
-  counts, guaranteed model identity, or API-level availability guarantees.
+- Tool calls are supported through a strict text protocol layered over the
+  browser UI. This is not the same as a provider-native ChatGPT API tool
+  channel. Calls are buffered, one at a time, and schema-validated before
+  OpenClaw receives them.
+- There are no general structured outputs, authoritative usage counts,
+  guaranteed model identity, or API-level availability guarantees.
 - ChatGPT sign-in challenges, rate limits, outages, account restrictions,
   project changes, and network failures are external dependencies.
 
@@ -73,8 +80,13 @@ README is a technical warning, not legal advice or a compliance determination.
   precedence.
 - Returned text is untrusted model output. It can contain prompt injection or
   incorrect instructions that affect later OpenClaw behavior.
-- The provider does not expose native tool execution. Tool-result text from
-  earlier turns can still be included in the serialized context.
+- OpenClaw's live tool catalog is serialized into the browser prompt. ChatGPT
+  can request one available tool with the exact `OPENCLAW_TOOL_CALL` format;
+  this provider validates the name and arguments, emits OpenClaw's native
+  `toolcall_*` events, and leaves policy, approval, and execution to OpenClaw.
+- Tool definitions, prior tool-call arguments, and tool-result text can be
+  included in the serialized context. The provider never executes a tool
+  directly inside the browser adapter.
 - Long contexts can exceed the configured transport limit or the practical
   limits of the ChatGPT composer. The provider rejects oversized envelopes.
 
@@ -119,10 +131,33 @@ The provider also:
 - rejects unexpected top-level navigation, popups, and downloads; and
 - uses typed failures for authentication, timeout, integrity, browser, and
   response errors so OpenClaw can classify fallback behavior.
+- validates browser-requested tool names and arguments against the live
+  OpenClaw tool catalog before emitting native tool-call events.
 
 These controls protect the local transport boundary. They do not make the
 ChatGPT website trustworthy, prevent public-web egress by themselves, or
 override account policy.
+
+## OpenClaw tool-call behavior
+
+Tool support is part of the provider contract. For each turn, OpenClaw passes
+the tools available to that agent and its active policy into the provider. The
+provider renders their names, descriptions, and JSON schemas into the bounded
+browser prompt. If ChatGPT needs one, it must return exactly one line such as:
+
+```text
+OPENCLAW_TOOL_CALL {"name":"read_file","arguments":{"path":"README.md"}}
+```
+
+The provider rejects malformed JSON, unknown tool names, invalid arguments, or
+extra prose around the marker. Valid calls become OpenClaw `toolCall` content
+and `toolcall_start`/`toolcall_delta`/`toolcall_end` events. OpenClaw then runs
+the normal tool policy, approval, execution, and result loop. The browser
+adapter has no direct file, shell, messaging, or other tool implementation.
+
+The browser transport requests at most one tool per turn. That preserves the
+provider's serialized full-context boundary; repeated tool use is handled by
+OpenClaw calling the provider again with the tool result.
 
 ## Configuration
 
@@ -237,7 +272,7 @@ npm run pack:check
 npm audit --omit=dev
 ```
 
-The current validation snapshot passed 57 tests, typecheck, build, package
+The current validation snapshot passed 64 tests, typecheck, build, package
 inspection, production dependency audit, contained firewall checks, and an
 isolated OpenClaw 2026.7.1 install. No external ChatGPT turn is implied by
 those checks.

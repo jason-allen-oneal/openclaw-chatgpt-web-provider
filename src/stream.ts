@@ -6,6 +6,7 @@ import {
 } from "openclaw/plugin-sdk/llm";
 import type { ChatGptWebClient } from "./browser-client.js";
 import { buildWebchatPrompt } from "./prompt.js";
+import { parseOpenClawToolCall } from "./tool-calls.js";
 
 export function createChatGptWebStreamFn(params: {
   client: ChatGptWebClient;
@@ -23,7 +24,7 @@ export function createChatGptWebStreamFn(params: {
               `Serialized fallback prompt is ${prompt.length} characters; configured maximum is ${params.maxPromptChars}`,
             );
           }
-          const empty = buildMessage(model, "", "stop", estimateUsage(prompt, ""));
+          const empty = buildMessage(model, [], "stop", estimateUsage(prompt, ""));
           stream.push({ type: "start", partial: empty });
           // This browser transport is intentionally buffered: it emits one text
           // delta only after the complete, positively terminated DOM response.
@@ -31,13 +32,37 @@ export function createChatGptWebStreamFn(params: {
           if (!text.trim()) {
             throw new Error("[chatgpt-web:empty_response] Browser transport returned no text");
           }
-          const message = buildMessage(model, text, "stop", estimateUsage(prompt, text));
-          const textStarted = buildMessage(
+          const toolCall = parseOpenClawToolCall(text, context.tools ?? []);
+          if (toolCall) {
+            const message = buildMessage(
+              model,
+              [toolCall],
+              "toolUse",
+              estimateUsage(prompt, text),
+            );
+            stream.push({ type: "toolcall_start", contentIndex: 0, partial: message });
+            stream.push({
+              type: "toolcall_delta",
+              contentIndex: 0,
+              delta: JSON.stringify(toolCall.arguments),
+              partial: message,
+            });
+            stream.push({
+              type: "toolcall_end",
+              contentIndex: 0,
+              toolCall,
+              partial: message,
+            });
+            stream.push({ type: "done", reason: "toolUse", message });
+            return;
+          }
+
+          const message = buildTextMessage(model, text, "stop", estimateUsage(prompt, text));
+          const textStarted = buildTextMessage(
             model,
             "",
             "stop",
             estimateUsage(prompt, ""),
-            undefined,
             true,
           );
           stream.push({ type: "text_start", contentIndex: 0, partial: textStarted });
@@ -57,7 +82,7 @@ export function createChatGptWebStreamFn(params: {
           const visibleError = aborted ? "" : "ChatGPT web transport failed.";
           const message = buildMessage(
             model,
-            visibleError,
+            visibleError ? [{ type: "text", text: visibleError }] : [],
             aborted ? "aborted" : "error",
             aborted ? emptyUsage() : estimateUsage("", visibleError),
             renderError(error),
@@ -79,15 +104,14 @@ export function createChatGptWebStreamFn(params: {
 
 function buildMessage(
   model: Parameters<StreamFn>[0],
-  text: string,
+  content: AssistantMessage["content"],
   stopReason: AssistantMessage["stopReason"],
   usage: Usage,
   errorMessage?: string,
-  includeEmptyTextBlock = false,
 ): AssistantMessage {
   return {
     role: "assistant",
-    content: text || includeEmptyTextBlock ? [{ type: "text", text }] : [],
+    content,
     api: model.api,
     provider: model.provider,
     model: model.id,
@@ -96,6 +120,21 @@ function buildMessage(
     ...(errorMessage ? { errorMessage } : {}),
     timestamp: Date.now(),
   };
+}
+
+function buildTextMessage(
+  model: Parameters<StreamFn>[0],
+  text: string,
+  stopReason: AssistantMessage["stopReason"],
+  usage: Usage,
+  includeEmptyTextBlock = false,
+): AssistantMessage {
+  return buildMessage(
+    model,
+    text || includeEmptyTextBlock ? [{ type: "text", text }] : [],
+    stopReason,
+    usage,
+  );
 }
 
 function estimateUsage(prompt: string, response: string): Usage {

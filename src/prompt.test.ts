@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildWebchatPrompt } from "./prompt.js";
 
 describe("buildWebchatPrompt", () => {
-  it("serializes system, conversation, and tool results", () => {
+  it("serializes system, conversation, tool results, and the tool protocol", () => {
     const prompt = buildWebchatPrompt({
       systemPrompt: "Be exact.",
       messages: [
@@ -20,10 +20,12 @@ describe("buildWebchatPrompt", () => {
     expect(prompt).toContain("Be exact.");
     expect(prompt).toContain("### User\nInspect it.");
     expect(prompt).toContain("### Tool result: read\nevidence");
-    expect(prompt).toContain("cannot return native tool calls");
+    expect(prompt).toContain("## Available OpenClaw tools");
+    expect(prompt).toContain("No tools are available for this turn.");
+    expect(prompt).toContain("Do not emit a tool-call marker because no tools are available.");
   });
 
-  it("omits hidden reasoning, tool arguments, signatures, and image bytes", () => {
+  it("omits hidden reasoning, signatures, and image bytes while preserving tool arguments", () => {
     const prompt = buildWebchatPrompt({
       systemPrompt: "Synthetic only.",
       messages: [
@@ -79,11 +81,32 @@ describe("buildWebchatPrompt", () => {
     });
 
     expect(prompt).toContain("visible");
-    expect(prompt).toContain("arguments omitted by fallback privacy policy");
+    expect(prompt).toContain('Arguments: {"secret":"PRIVATE_ARGUMENT"}');
     expect(prompt).toContain("image omitted by text-only fallback transport");
-    expect(prompt).not.toMatch(
-      /PRIVATE_(?:IMAGE_BYTES|REASONING|SIG|ARGUMENT|TOOL_SIG|TOOL_IMAGE)/,
-    );
+    expect(prompt).not.toMatch(/PRIVATE_(?:IMAGE_BYTES|REASONING|SIG|TOOL_SIG|TOOL_IMAGE)/);
+  });
+
+  it("serializes the live OpenClaw tool catalog and strict call format", () => {
+    const prompt = buildWebchatPrompt({
+      tools: [
+        {
+          name: "read_file",
+          description: "Read one approved file.",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      messages: [{ role: "user", content: "Read the file.", timestamp: 1 }],
+    });
+
+    expect(prompt).toContain("### read_file\nRead one approved file.");
+    expect(prompt).toContain('Parameters (JSON Schema): {"type":"object"');
+    expect(prompt).toContain("OPENCLAW_TOOL_CALL");
+    expect(prompt).toContain("OpenClaw will execute it");
   });
 
   it("renders empty and mixed messages explicitly", () => {

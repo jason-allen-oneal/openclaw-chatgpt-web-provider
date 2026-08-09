@@ -13,6 +13,7 @@ type ProviderRegistration = {
   resolveSyntheticAuth?(): { apiKey: string };
   resolveDynamicModel?(input: { provider: string; modelId: string }): Model | undefined;
   createStreamFn?(input: { model: Model }): StreamFn | undefined;
+  normalizeToolSchemas?(input: { tools: unknown[] }): unknown[];
   classifyFailoverReason?(input: { errorMessage: string }): string | undefined;
 };
 
@@ -64,6 +65,12 @@ describe("ChatGPT web provider registration", () => {
       provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.api,
     ).toBe("chatgpt-web");
     expect(provider.resolveSyntheticAuth?.().apiKey).toBe("chatgpt-web-local");
+  });
+
+  it("preserves OpenClaw's live tool catalog for the agent loop", () => {
+    const { provider } = register("discovery");
+    const tools = [{ name: "read_file" }];
+    expect(provider.normalizeToolSchemas?.({ tools })).toBe(tools);
   });
 
   it("fails closed at inference without the explicit data-egress acknowledgement", async () => {

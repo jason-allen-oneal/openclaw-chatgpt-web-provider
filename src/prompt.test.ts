@@ -22,5 +22,77 @@ describe("buildWebchatPrompt", () => {
     expect(prompt).toContain("### Tool result: read\nevidence");
     expect(prompt).toContain("cannot return native tool calls");
   });
-});
 
+  it("omits hidden reasoning, tool arguments, signatures, and image bytes", () => {
+    const prompt = buildWebchatPrompt({
+      systemPrompt: "Synthetic only.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "visible" },
+            { type: "image", mimeType: "image/png", data: "PRIVATE_IMAGE_BYTES" },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "PRIVATE_REASONING", thinkingSignature: "PRIVATE_SIG" },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "dangerous_tool",
+              arguments: { secret: "PRIVATE_ARGUMENT" },
+              thoughtSignature: "PRIVATE_TOOL_SIG",
+            },
+          ],
+          api: "chatgpt-web",
+          provider: "chatgpt-web",
+          model: "backup",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0,
+            },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: "dangerous_tool",
+          content: [{ type: "image", mimeType: "image/jpeg", data: "PRIVATE_TOOL_IMAGE" }],
+          isError: false,
+          timestamp: 3,
+        },
+      ],
+    });
+
+    expect(prompt).toContain("visible");
+    expect(prompt).toContain("arguments omitted by fallback privacy policy");
+    expect(prompt).toContain("image omitted by text-only fallback transport");
+    expect(prompt).not.toMatch(
+      /PRIVATE_(?:IMAGE_BYTES|REASONING|SIG|ARGUMENT|TOOL_SIG|TOOL_IMAGE)/,
+    );
+  });
+
+  it("renders empty and mixed messages explicitly", () => {
+    const prompt = buildWebchatPrompt({
+      messages: [
+        { role: "user", content: [], timestamp: 1 },
+        { role: "user", content: "", timestamp: 2 },
+      ],
+    });
+    expect(prompt).toContain("[empty message]");
+  });
+});

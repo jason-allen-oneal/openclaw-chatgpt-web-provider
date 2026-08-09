@@ -1,14 +1,40 @@
 {
   "id": "chatgpt-web",
   "name": "ChatGPT Web Backup Provider",
-  "description": "Experimental browser-backed ChatGPT provider intended only for fallback use",
+  "description": "Private browser-backed ChatGPT provider pinned to OpenClaw 2026.7.1 and intended only for fallback use",
   "activation": {
-    "onStartup": false
+    "onStartup": true
   },
   "enabledByDefault": false,
   "providers": [
     "chatgpt-web"
   ],
+  "modelCatalog": {
+    "providers": {
+      "chatgpt-web": {
+        "baseUrl": "chatgpt-web://local",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "backup",
+            "name": "ChatGPT Web (backup)",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 32768,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
   "autoEnableWhenConfiguredProviders": [
     "chatgpt-web"
   ],
@@ -43,8 +69,18 @@
       "executablePath": {
         "type": "string"
       },
+      "sandboxMode": {
+        "type": "string",
+        "enum": [
+          "default",
+          "userns"
+        ]
+      },
       "headless": {
-        "type": "boolean"
+        "type": "boolean",
+        "enum": [
+          true
+        ]
       },
       "acknowledgeDataEgress": {
         "type": "boolean"
@@ -52,7 +88,7 @@
       "maxPromptChars": {
         "type": "integer",
         "minimum": 1000,
-        "maximum": 200000
+        "maximum": 60000
       },
       "readyTimeoutMs": {
         "type": "integer",
@@ -79,10 +115,19 @@
           "send": {
             "type": "string"
           },
+          "message": {
+            "type": "string"
+          },
           "assistant": {
             "type": "string"
           },
+          "user": {
+            "type": "string"
+          },
           "responseContent": {
+            "type": "string"
+          },
+          "completion": {
             "type": "string"
           },
           "stop": {

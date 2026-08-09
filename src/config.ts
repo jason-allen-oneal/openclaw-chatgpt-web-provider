@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 
 export const CHATGPT_WEB_PROVIDER_ID = "chatgpt-web";
 export const CHATGPT_WEB_MODEL_ID = "backup";
@@ -7,8 +8,11 @@ export const CHATGPT_WEB_AUTH_MARKER = "chatgpt-web-local";
 export interface ChatGptWebSelectors {
   composer: string;
   send: string;
+  message: string;
   assistant: string;
+  user: string;
   responseContent: string;
+  completion: string;
   stop: string;
 }
 
@@ -18,6 +22,7 @@ export interface ChatGptWebConfig {
   profileDir: string;
   cdpUrl: string;
   executablePath?: string;
+  sandboxMode: "default" | "userns";
   headless: boolean;
   acknowledgeDataEgress: boolean;
   maxPromptChars: number;
@@ -32,9 +37,13 @@ const DEFAULT_SELECTORS: ChatGptWebSelectors = {
     'form[data-type="unified-composer"] #prompt-textarea[contenteditable="true"][role="textbox"], #prompt-textarea[contenteditable="true"][role="textbox"]',
   send:
     'form[data-type="unified-composer"] button[data-testid="send-button"], form[data-type="unified-composer"] button[aria-label="Send prompt"]',
+  message: '[data-message-author-role][data-message-id]',
   assistant: '[data-message-author-role="assistant"][data-message-id]',
+  user: '[data-message-author-role="user"][data-message-id]',
   responseContent:
     '[data-message-content-part="final"], [data-message-content="final"], .markdown.prose, .markdown, .prose',
+  completion:
+    '[data-message-content-part="final"], [data-message-content="final"]',
   stop:
     'form[data-type="unified-composer"] button[data-testid="stop-button"], form[data-type="unified-composer"] button[aria-label*="Stop"]',
 };
@@ -42,11 +51,12 @@ const DEFAULT_SELECTORS: ChatGptWebSelectors = {
 const DEFAULT_CONFIG: ChatGptWebConfig = {
   webchatUrl: "https://chatgpt.com/",
   mode: "launch",
-  profileDir: "~/.openclaw/state/chatgpt-web/profile",
+  profileDir: path.join(resolveStateDir(), "chatgpt-web", "profile"),
   cdpUrl: "http://127.0.0.1:9222",
-  headless: false,
+  sandboxMode: "default",
+  headless: true,
   acknowledgeDataEgress: false,
-  maxPromptChars: 100_000,
+  maxPromptChars: 50_000,
   readyTimeoutMs: 30_000,
   responseTimeoutMs: 180_000,
   stabilityWindowMs: 1_500,
@@ -66,12 +76,13 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
     ...(readOptionalString(raw.executablePath)
       ? { executablePath: expandHome(readOptionalString(raw.executablePath)!) }
       : {}),
-    headless: readBoolean(raw.headless, DEFAULT_CONFIG.headless),
+    sandboxMode: raw.sandboxMode === "userns" ? "userns" : "default",
+    headless: readHeadless(raw.headless),
     acknowledgeDataEgress: readBoolean(
       raw.acknowledgeDataEgress,
       DEFAULT_CONFIG.acknowledgeDataEgress,
     ),
-    maxPromptChars: readInteger(raw.maxPromptChars, DEFAULT_CONFIG.maxPromptChars, 1_000, 200_000),
+    maxPromptChars: readInteger(raw.maxPromptChars, DEFAULT_CONFIG.maxPromptChars, 1_000, 60_000),
     readyTimeoutMs: readInteger(
       raw.readyTimeoutMs,
       DEFAULT_CONFIG.readyTimeoutMs,
@@ -93,11 +104,14 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
     selectors: {
       composer: readString(selectors.composer, DEFAULT_SELECTORS.composer),
       send: readString(selectors.send, DEFAULT_SELECTORS.send),
+      message: readString(selectors.message, DEFAULT_SELECTORS.message),
       assistant: readString(selectors.assistant, DEFAULT_SELECTORS.assistant),
+      user: readString(selectors.user, DEFAULT_SELECTORS.user),
       responseContent: readString(
         selectors.responseContent,
         DEFAULT_SELECTORS.responseContent,
       ),
+      completion: readString(selectors.completion, DEFAULT_SELECTORS.completion),
       stop: readString(selectors.stop, DEFAULT_SELECTORS.stop),
     },
   };
@@ -121,6 +135,15 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function readHeadless(value: unknown): true {
+  if (value === false) {
+    throw new Error(
+      "headless must be true; provider turns never launch a visible browser window",
+    );
+  }
+  return true;
+}
+
 function readInteger(
   value: unknown,
   fallback: number,
@@ -140,7 +163,10 @@ function readChatGptUrl(value: unknown): string {
     const url = new URL(candidate);
     if (
       url.protocol !== "https:" ||
-      (url.hostname !== "chatgpt.com" && url.hostname !== "chat.openai.com")
+      (url.hostname !== "chatgpt.com" && url.hostname !== "chat.openai.com") ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.port !== ""
     ) {
       throw new Error("unexpected origin");
     }
@@ -155,10 +181,23 @@ function readLoopbackCdpUrl(value: unknown): string {
   try {
     const url = new URL(candidate);
     const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
-    if (!loopbackHosts.has(url.hostname)) throw new Error("non-loopback host");
+    if (
+      url.protocol !== "http:" ||
+      !loopbackHosts.has(url.hostname) ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.port === "" ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      throw new Error("invalid CDP endpoint");
+    }
     return url.toString();
   } catch {
-    throw new Error("cdpUrl must use a loopback host");
+    throw new Error(
+      "cdpUrl must be an HTTP endpoint with an explicit port on 127.0.0.1, localhost, or [::1]",
+    );
   }
 }
 

@@ -32,7 +32,7 @@ function labelForMessage(message: Message): string {
 }
 
 function renderMessage(message: Message): string {
-  if (typeof message.content === "string") return message.content;
+  if (typeof message.content === "string") return message.content.trim() || "[empty message]";
   const parts: string[] = [];
   for (const part of message.content) {
     if (part.type === "text") {

@@ -6,21 +6,13 @@ import {
 import { ChatGptWebError, PlaywrightChatGptWebClient } from "./browser-client.js";
 import {
   CHATGPT_WEB_AUTH_MARKER,
-  CHATGPT_WEB_MODEL_ID,
   CHATGPT_WEB_PROVIDER_ID,
+  CHATGPT_WEB_THINKING_LEVELS,
   resolveChatGptWebConfig,
+  type ChatGptWebModelConfig,
 } from "./config.js";
+import type { ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
 import { createChatGptWebStreamFn } from "./stream.js";
-
-const MODEL = {
-  id: CHATGPT_WEB_MODEL_ID,
-  name: "ChatGPT Web (backup)",
-  reasoning: false,
-  input: ["text"] as ("text" | "image")[],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 32_768,
-  maxTokens: 8_192,
-};
 
 const CHATGPT_WEB_API = "chatgpt-web";
 // OpenClaw 2026.7.1's catalog config accepts only built-in transport ids.
@@ -34,6 +26,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
   description: "Native-headless ChatGPT fallback provider pinned to OpenClaw 2026.7.1",
   register(api: OpenClawPluginApi) {
     const config = resolveChatGptWebConfig(api.pluginConfig);
+    const catalogModels = config.models.map(toCatalogModel);
     const browserClient = new PlaywrightChatGptWebClient(config, api.logger);
     const client = config.acknowledgeDataEgress
       ? browserClient
@@ -75,7 +68,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
             api: CHATGPT_WEB_CATALOG_API,
             baseUrl: "chatgpt-web://local",
             apiKey: CHATGPT_WEB_AUTH_MARKER,
-            models: [MODEL],
+            models: catalogModels,
           },
         }),
       },
@@ -85,7 +78,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           provider: {
             api: CHATGPT_WEB_CATALOG_API,
             baseUrl: "chatgpt-web://local",
-            models: [MODEL],
+            models: catalogModels,
           },
         }),
       },
@@ -94,22 +87,22 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         source: "chatgpt-web dedicated local browser profile",
         mode: "api-key" as const,
       }),
-      resolveDynamicModel: ({ provider, modelId }) =>
-        provider === CHATGPT_WEB_PROVIDER_ID && modelId === CHATGPT_WEB_MODEL_ID
-          ? {
-              ...MODEL,
-              provider,
-              api: CHATGPT_WEB_API,
-              baseUrl: "chatgpt-web://local",
-            }
-          : undefined,
-      createStreamFn: ({ model }) =>
-        model.provider === CHATGPT_WEB_PROVIDER_ID
+      resolveDynamicModel: ({ provider, modelId }) => {
+        if (provider !== CHATGPT_WEB_PROVIDER_ID) return undefined;
+        const modelConfig = config.models.find((candidate) => candidate.id === modelId);
+        return modelConfig ? toRuntimeModel(modelConfig) : undefined;
+      },
+      createStreamFn: ({ model }) => {
+        if (model.provider !== CHATGPT_WEB_PROVIDER_ID) return undefined;
+        const modelConfig = config.models.find((candidate) => candidate.id === model.id);
+        return modelConfig
           ? createChatGptWebStreamFn({
               client,
+              modelConfig,
               maxPromptChars: config.maxPromptChars,
             })
-          : undefined,
+          : undefined;
+      },
       buildReplayPolicy: () => ({
         dropThinkingBlocks: true,
       }),
@@ -127,6 +120,38 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
 });
 
 export default plugin;
+
+function toCatalogModel(modelConfig: ChatGptWebModelConfig) {
+  return {
+    id: modelConfig.id,
+    name: modelConfig.name,
+    reasoning: modelConfig.reasoning,
+    ...(modelConfig.reasoning
+      ? { thinkingLevelMap: buildThinkingLevelMap(modelConfig) }
+      : {}),
+    input: ["text"] as ("text" | "image")[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 32_768,
+    maxTokens: 8_192,
+  };
+}
+
+function buildThinkingLevelMap(modelConfig: ChatGptWebModelConfig) {
+  const map: Partial<Record<ModelThinkingLevel, string | null>> = {};
+  for (const level of CHATGPT_WEB_THINKING_LEVELS) {
+    map[level] = level === "off" || modelConfig.reasoningOptions[level] ? level : null;
+  }
+  return map;
+}
+
+function toRuntimeModel(modelConfig: ChatGptWebModelConfig) {
+  return {
+    ...toCatalogModel(modelConfig),
+    provider: CHATGPT_WEB_PROVIDER_ID,
+    api: CHATGPT_WEB_API,
+    baseUrl: "chatgpt-web://local",
+  };
+}
 
 function classifyChatGptWebFailure(errorMessage: string) {
   if (/\[chatgpt-web:auth\]/i.test(errorMessage)) return "auth" as const;

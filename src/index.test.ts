@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import plugin from "./index.js";
 
 type ProviderRegistration = {
-  catalog?: { run(): Promise<{ provider: { api?: string } }> };
-  staticCatalog?: { run(): Promise<{ provider: { api?: string } }> };
+  catalog?: { run(): Promise<{ provider: { api?: string; models?: Model[] } }> };
+  staticCatalog?: { run(): Promise<{ provider: { api?: string; models?: Model[] } }> };
   resolveSyntheticAuth?(): { apiKey: string };
   resolveDynamicModel?(input: { provider: string; modelId: string }): Model | undefined;
   createStreamFn?(input: { model: Model }): StreamFn | undefined;
@@ -17,12 +17,16 @@ type ProviderRegistration = {
   classifyFailoverReason?(input: { errorMessage: string }): string | undefined;
 };
 
-function register(registrationMode: "discovery" | "full", acknowledgeDataEgress = false) {
+function register(
+  registrationMode: "discovery" | "full",
+  acknowledgeDataEgress = false,
+  extraConfig: Record<string, unknown> = {},
+) {
   const providers: ProviderRegistration[] = [];
   const services: OpenClawPluginService[] = [];
   const cleanups: Array<() => void | Promise<void>> = [];
   const api = {
-    pluginConfig: { acknowledgeDataEgress },
+    pluginConfig: { ...extraConfig, acknowledgeDataEgress },
     registrationMode,
     logger: {
       debug: vi.fn(),
@@ -64,7 +68,35 @@ describe("ChatGPT web provider registration", () => {
     expect(
       provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.api,
     ).toBe("chatgpt-web");
+    expect(
+      provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.reasoning,
+    ).toBe(false);
     expect(provider.resolveSyntheticAuth?.().apiKey).toBe("chatgpt-web-local");
+  });
+
+  it("registers configured model ids and their reasoning capabilities", async () => {
+    const { provider } = register("discovery", false, {
+      models: [
+        {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          webLabel: "GPT-5",
+          reasoning: true,
+          reasoningOptions: { off: "Auto", high: "Extended" },
+        },
+      ],
+    });
+
+    expect((await provider.catalog?.run())?.provider.models).toEqual([
+      expect.objectContaining({
+        id: "gpt-5",
+        reasoning: true,
+        thinkingLevelMap: expect.objectContaining({ off: "off", low: null, high: "high" }),
+      }),
+    ]);
+    expect(
+      provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "gpt-5" }),
+    ).toMatchObject({ id: "gpt-5", reasoning: true, api: "chatgpt-web" });
   });
 
   it("preserves OpenClaw's live tool catalog for the agent loop", () => {

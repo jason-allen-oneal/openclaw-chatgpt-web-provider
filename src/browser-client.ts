@@ -23,6 +23,8 @@ import {
   type Page,
 } from "playwright-core";
 import type { ChatGptWebConfig } from "./config.js";
+import type { ChatGptWebModelConfig } from "./config.js";
+import type { ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
 
 export interface BrowserClientLogger {
   debug?(message: string): void;
@@ -32,7 +34,16 @@ export interface BrowserClientLogger {
 }
 
 export interface ChatGptWebClient {
-  ask(prompt: string, signal?: AbortSignal): Promise<string>;
+  ask(
+    prompt: string,
+    signal?: AbortSignal,
+    controls?: ChatGptWebTurnControls,
+  ): Promise<string>;
+}
+
+export interface ChatGptWebTurnControls {
+  model?: ChatGptWebModelConfig;
+  reasoning?: ModelThinkingLevel;
 }
 
 export interface BrowserAutomation {
@@ -129,7 +140,11 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       dependencies.resolveExecutableVersion ?? resolveChromiumVersion;
   }
 
-  async ask(prompt: string, signal?: AbortSignal): Promise<string> {
+  async ask(
+    prompt: string,
+    signal?: AbortSignal,
+    controls?: ChatGptWebTurnControls,
+  ): Promise<string> {
     return await this.#enqueue(async () => {
       this.#assertOpen();
       throwIfAborted(signal);
@@ -149,7 +164,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const boundary = installPageBoundaryGuards(page, this.#config.webchatUrl);
         try {
           return await Promise.race([
-            this.#runTurn(page, prompt, controller.signal),
+            this.#runTurn(page, prompt, controller.signal, controls),
             boundary.violation,
           ]);
         } finally {
@@ -313,7 +328,12 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     }
   }
 
-  async #runTurn(page: Page, prompt: string, signal: AbortSignal): Promise<string> {
+  async #runTurn(
+    page: Page,
+    prompt: string,
+    signal: AbortSignal,
+    controls?: ChatGptWebTurnControls,
+  ): Promise<string> {
     try {
       await page.goto(this.#config.webchatUrl, { waitUntil: "domcontentloaded" });
     } catch (error) {
@@ -332,6 +352,8 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         error,
       );
     }
+
+    await applyBrowserControls(page, this.#config, controls, signal, this.#now);
 
     const beforeMessageCount = await page.locator(this.#config.selectors.message).count();
     const nonce = this.#nonceFactory();
@@ -551,6 +573,130 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     await page.locator(this.#config.selectors.stop).first().click().catch(() => undefined);
     await page.close().catch(() => undefined);
   }
+}
+
+async function applyBrowserControls(
+  page: Page,
+  config: ChatGptWebConfig,
+  controls: ChatGptWebTurnControls | undefined,
+  signal: AbortSignal,
+  now: () => number,
+): Promise<void> {
+  const modelLabel = controls?.model?.webLabel;
+  if (modelLabel) {
+    await selectBrowserOption(page, config, signal, {
+      picker: config.selectors.modelPicker,
+      option: config.selectors.modelOption,
+      pickerKey: "modelPicker",
+      optionKey: "modelOption",
+      label: modelLabel,
+      description: "model",
+      now,
+    });
+  }
+
+  const reasoning = controls?.reasoning;
+  const reasoningLabel =
+    reasoning === undefined ? undefined : controls?.model?.reasoningOptions[reasoning];
+  if (reasoningLabel) {
+    await selectBrowserOption(page, config, signal, {
+      picker: config.selectors.reasoningPicker,
+      option: config.selectors.reasoningOption,
+      pickerKey: "reasoningPicker",
+      optionKey: "reasoningOption",
+      label: reasoningLabel,
+      description: `reasoning level ${reasoning}`,
+      now,
+    });
+  }
+}
+
+async function selectBrowserOption(
+  page: Page,
+  config: ChatGptWebConfig,
+  signal: AbortSignal,
+  selection: {
+    picker: string | undefined;
+    option: string | undefined;
+    pickerKey: "modelPicker" | "reasoningPicker";
+    optionKey: "modelOption" | "reasoningOption";
+    label: string;
+    description: string;
+    now: () => number;
+  },
+): Promise<void> {
+  if (!selection.picker || !selection.option) {
+    throw new ChatGptWebError(
+      "browser",
+      `A ChatGPT web ${selection.description} "${selection.label}" was requested, but both selectors.${selection.pickerKey} and selectors.${selection.optionKey} must be configured`,
+    );
+  }
+
+  throwIfAborted(signal);
+  assertExpectedOrigin(page.url(), config.webchatUrl);
+  const picker = page.locator(selection.picker).first();
+  try {
+    await picker.waitFor({ state: "visible", timeout: config.readyTimeoutMs });
+    assertExpectedOrigin(page.url(), config.webchatUrl);
+    await picker.click();
+  } catch (error) {
+    if (error instanceof ChatGptWebError) throw error;
+    throw new ChatGptWebError(
+      "browser",
+      `Configured ChatGPT web ${selection.description} picker was not usable`,
+      error,
+    );
+  }
+
+  const options = page.locator(selection.option);
+  const deadline = selection.now() + config.readyTimeoutMs;
+  const expected = normalizeOptionText(selection.label);
+  while (selection.now() < deadline) {
+    throwIfAborted(signal);
+    assertExpectedOrigin(page.url(), config.webchatUrl);
+    const count = await options.count();
+    for (let index = 0; index < count; index += 1) {
+      const candidate = options.nth(index);
+      if (!(await candidate.isVisible().catch(() => false))) continue;
+      const actual = normalizeOptionText(await candidate.innerText().catch(() => ""));
+      if (actual !== expected) continue;
+      assertExpectedOrigin(page.url(), config.webchatUrl);
+      await candidate.click();
+      assertExpectedOrigin(page.url(), config.webchatUrl);
+      if (!(await isBrowserOptionCommitted(picker, candidate, expected))) {
+        throw new ChatGptWebError(
+          "integrity",
+          `ChatGPT web ${selection.description} option "${selection.label}" did not report a committed selection`,
+        );
+      }
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+
+  throw new ChatGptWebError(
+    "browser",
+    `Configured ChatGPT web ${selection.description} option "${selection.label}" was not found`,
+  );
+}
+
+async function isBrowserOptionCommitted(
+  picker: Locator,
+  option: Locator,
+  expected: string,
+): Promise<boolean> {
+  for (const attribute of ["aria-selected", "aria-checked", "data-state"]) {
+    const value = (await option.getAttribute(attribute).catch(() => null))?.toLocaleLowerCase();
+    if (value === "true" || value === "checked" || value === "selected" || value === "active") {
+      return true;
+    }
+  }
+  const pickerText = normalizeOptionText(await picker.innerText().catch(() => ""));
+  return pickerText === expected || pickerText.includes(expected);
+}
+
+function normalizeOptionText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 
 function canonicalizeBoundContext(value: string): string {

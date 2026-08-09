@@ -27,6 +27,48 @@ describe("resolveChatGptWebConfig", () => {
     expect(config.acknowledgeDataEgress).toBe(true);
   });
 
+  it("accepts explicit OpenClaw models and web picker labels", () => {
+    const config = resolveChatGptWebConfig({
+      models: [
+        {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          webLabel: "GPT-5",
+          reasoning: true,
+          reasoningOptions: { off: "Auto", low: "Standard", high: "Extended" },
+        },
+      ],
+      selectors: {
+        modelPicker: "#model-picker",
+        modelOption: "[role=option]",
+        reasoningPicker: "#reasoning-picker",
+        reasoningOption: "[role=menuitem]",
+      },
+    });
+
+    expect(config.models).toEqual([
+      {
+        id: "gpt-5",
+        name: "ChatGPT Web GPT-5",
+        webLabel: "GPT-5",
+        reasoning: true,
+        reasoningOptions: { off: "Auto", low: "Standard", high: "Extended" },
+      },
+    ]);
+    expect(config.selectors.modelPicker).toBe("#model-picker");
+    expect(config.selectors.reasoningOption).toBe("[role=menuitem]");
+  });
+
+  it.each([
+    { models: [] },
+    { models: [{ id: "gpt/5" }] },
+    { models: [{ id: "gpt-5" }, { id: "gpt-5" }] },
+    { models: [{ id: "gpt-5", webLabel: "GPT-5", reasoning: false, reasoningOptions: { high: "Extended" } }] },
+    { models: [{ id: "gpt-5", webLabel: "GPT-5", reasoning: true, reasoningOptions: { high: "Extended" } }] },
+  ])("rejects invalid model controls: %j", (value) => {
+    expect(() => resolveChatGptWebConfig(value)).toThrow(/models/);
+  });
+
   it.each([
     "http://chatgpt.com/",
     "https://example.com/",

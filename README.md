@@ -69,7 +69,10 @@ README is a technical warning, not legal advice or a compliance determination.
   channel. Calls are buffered, one at a time, and schema-validated before
   OpenClaw receives them.
 - There are no general structured outputs, authoritative usage counts,
-  guaranteed model identity, or API-level availability guarantees.
+  guaranteed model identity, or API-level availability guarantees. Model
+  selection and reasoning controls are best-effort browser UI controls unless
+  the configured picker selectors verify them; the web application can still
+  change or ignore them.
 - ChatGPT sign-in challenges, rate limits, outages, account restrictions,
   project changes, and network failures are external dependencies.
 
@@ -192,6 +195,62 @@ The provider's package, peer dependency, and plugin API are pinned to
 adapter identifier, while runtime resolution uses the provider-owned stream
 hook. This is compatibility metadata, not an OpenAI-compatible HTTP endpoint.
 
+## Model and reasoning selection
+
+The default model reference remains:
+
+```text
+chatgpt-web/backup
+```
+
+The provider also honors OpenClaw model selection and normalized thinking
+levels. Add an explicit model catalog to the plugin config when the ChatGPT web
+account exposes more than the currently selected model:
+
+```json
+{
+  "models": [
+    {
+      "id": "gpt-5",
+      "name": "ChatGPT Web GPT-5",
+      "webLabel": "GPT-5",
+      "reasoning": true,
+      "reasoningOptions": {
+        "off": "Auto",
+        "low": "Standard",
+        "high": "Extended"
+      }
+    }
+  ]
+}
+```
+
+That exposes `chatgpt-web/gpt-5` to OpenClaw. `webLabel` is an exact visible
+label for the ChatGPT web model picker, not an API model identifier. A custom
+model id requires `webLabel`, and the provider selects it only when both
+`selectors.modelPicker` and `selectors.modelOption` are configured to match the
+current ChatGPT DOM. Only the special `backup` model may omit `webLabel`; it
+means “use the model already selected in the web UI.” The provider does not
+claim that the web application actually served the requested model.
+
+OpenClaw's `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`
+thinking levels can be enabled per model. Each enabled model must define an
+exact `reasoningOptions` label for `off` and every level it advertises. A
+`reasoningOptions` entry plus `selectors.reasoningPicker` and
+`selectors.reasoningOption` selects the matching visible web control. An
+unmapped level, missing picker selectors, missing option, or uncommitted click
+fails before the prompt is submitted. The adapter returns final text only: it
+does not expose or invent hidden chain-of-thought blocks. The default `backup`
+model does not advertise reasoning until it is explicitly configured with
+reviewed web labels and selectors.
+
+Use the selected model in the normal OpenClaw model setting, for example
+`chatgpt-web/gpt-5`, and use the normal OpenClaw thinking control such as
+`/thinking high`. The browser selectors are deliberately not hard-coded because
+ChatGPT's web DOM is an unstable private implementation detail. Determine and
+review them against the account or Project before enabling a model or reasoning
+picker mapping.
+
 ## Isolated canary
 
 Do not begin with the live OpenClaw installation. Use a disposable OS account,
@@ -272,7 +331,7 @@ npm run pack:check
 npm audit --omit=dev
 ```
 
-The current validation snapshot passed 64 tests, typecheck, build, package
+The current validation snapshot passed 78 tests, typecheck, build, package
 inspection, production dependency audit, contained firewall checks, and an
 isolated OpenClaw 2026.7.1 install. No external ChatGPT turn is implied by
 those checks.

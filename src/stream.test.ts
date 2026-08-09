@@ -1,6 +1,7 @@
 import type { Model, Tool } from "openclaw/plugin-sdk/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatGptWebClient } from "./browser-client.js";
+import type { ChatGptWebModelConfig } from "./config.js";
 import { createChatGptWebStreamFn } from "./stream.js";
 
 const model: Model = {
@@ -25,6 +26,14 @@ const readFileTool: Tool = {
     required: ["path"],
     additionalProperties: false,
   },
+};
+
+const configuredModel: ChatGptWebModelConfig = {
+  id: "gpt-5",
+  name: "ChatGPT Web GPT-5",
+  webLabel: "GPT-5",
+  reasoning: true,
+  reasoningOptions: { off: "Auto", high: "Extended" },
 };
 
 describe("createChatGptWebStreamFn", () => {
@@ -52,6 +61,43 @@ describe("createChatGptWebStreamFn", () => {
       partial: { content: [{ type: "text", text: "" }] },
     });
     expect(result.content).toEqual([{ type: "text", text: "fallback answer" }]);
+  });
+
+  it("passes OpenClaw model and reasoning controls to the browser client", async () => {
+    const ask = vi.fn().mockResolvedValue("controlled answer");
+    const stream = await createChatGptWebStreamFn({
+      client: { ask },
+      modelConfig: configuredModel,
+      maxPromptChars: 100_000,
+    })(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] }, { reasoning: "high" });
+    for await (const _event of stream) {
+      // Drain the protocol.
+    }
+
+    expect(ask).toHaveBeenCalledWith(
+      expect.stringContaining("ChatGPT web model: GPT-5"),
+      undefined,
+      {
+        model: configuredModel,
+        reasoning: "high",
+      },
+    );
+    expect(ask.mock.calls[0]?.[0]).toContain("Requested reasoning effort: high");
+  });
+
+  it("fails before browser egress when a requested reasoning level is unmapped", async () => {
+    const ask = vi.fn();
+    const stream = await createChatGptWebStreamFn({
+      client: { ask },
+      modelConfig: configuredModel,
+      maxPromptChars: 100_000,
+    })(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] }, { reasoning: "low" });
+    for await (const _event of stream) {
+      // Drain the protocol.
+    }
+
+    expect(ask).not.toHaveBeenCalled();
+    expect((await stream.result()).errorMessage).toMatch(/low.*not configured/);
   });
 
   it("emits a validated native OpenClaw tool call from the browser response", async () => {

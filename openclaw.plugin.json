@@ -105,6 +105,45 @@
         "minimum": 250,
         "maximum": 30000
       },
+      "models": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "boolean"
+            },
+            "webLabel": {
+              "type": "string"
+            },
+            "reasoningOptions": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "off": { "type": "string" },
+                "minimal": { "type": "string" },
+                "low": { "type": "string" },
+                "medium": { "type": "string" },
+                "high": { "type": "string" },
+                "xhigh": { "type": "string" },
+                "max": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
       "selectors": {
         "type": "object",
         "additionalProperties": false,
@@ -131,6 +170,18 @@
             "type": "string"
           },
           "stop": {
+            "type": "string"
+          },
+          "modelPicker": {
+            "type": "string"
+          },
+          "modelOption": {
+            "type": "string"
+          },
+          "reasoningPicker": {
+            "type": "string"
+          },
+          "reasoningOption": {
             "type": "string"
           }
         }

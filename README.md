@@ -1,9 +1,8 @@
 # ChatGPT Web Backup Provider for OpenClaw 2026.7.1
 
-Public source repository for an internal-use, browser-backed OpenClaw text
-provider. At runtime it is a last-resort fallback for isolated agents, not a
-replacement for the OpenAI API or the native Codex runtime. The package remains
-marked private and is not intended for npm publication or general deployment.
+This repository contains a browser-backed fallback provider for OpenClaw. It
+uses a dedicated Chromium profile and the ChatGPT web application to answer a
+text-only turn when the normal provider is unavailable.
 
 Model reference:
 
@@ -11,133 +10,123 @@ Model reference:
 chatgpt-web/backup
 ```
 
-## Frozen compatibility contract
+This is a last-resort provider. It is not an OpenAI API client, an official
+OpenAI integration, or a replacement for a supported model endpoint. The npm
+package is marked private and is not intended for registry publication.
 
-- OpenClaw package, peer dependency, and plugin API: **exactly `2026.7.1`**.
-- Playwright Core: **exactly `1.61.1`**.
-- Later OpenClaw versions are unsupported until they pass the complete test and
-  isolated-install matrix and the pins are deliberately changed.
-- The runtime provider uses OpenClaw 2026.7.1's custom `createStreamFn` seam
-  and the custom API ID `chatgpt-web`; it does not pretend to be an
-  OpenAI-compatible HTTP API. The manifest catalog row uses
-  `openai-completions` only as the built-in adapter identifier accepted by
-  OpenClaw 2026.7.1's catalog validator; runtime model resolution switches to
-  the provider-owned `chatgpt-web` stream hook.
+## Stop and read this first
 
-## Transport contract
+Enabling this provider can send the following to a third-party ChatGPT account:
 
-- Launch mode uses a fresh Chromium context and provider-owned page for each
-  serialized turn. Cookies persist in the dedicated profile; Chromium itself
-  exits after every turn.
-- CDP mode connects only to an explicit loopback HTTP endpoint and owns only
-  the pages it creates. The target browser and its first context must still be
-  dedicated to this provider; loopback validation cannot prove profile
-  ownership.
-- Turns are strictly serialized. Cancellation closes the active owned page.
-  Shutdown aborts active work, rejects queued work, drains the queue, and then
-  closes the launch context or disposes the CDP connection.
-- The complete OpenClaw context is sent as one ChatGPT user message. Responses
-  are **buffered pseudo-streaming**: OpenClaw receives one text delta only after
-  the DOM exposes a positive completion state.
-- Each request includes a unique nonce and SHA-256 request marker. The complete
-  context is represented once as a compact, one-to-one visual transport body:
-  letters and digits remain literal, spaces/newlines use visible control
-  symbols, ASCII punctuation uses its fullwidth counterpart, and original
-  non-ASCII UTF-16 code units use bracketed hexadecimal tokens. The provider
-  hashes that body and requires the next DOM user node to reproduce the same
-  canonicalized envelope; only incidental DOM whitespace outside the visual
-  body is normalized. It then accepts only the immediately following assistant
-  response. The response must end with the exact nonce receipt, which is
-  stripped before returning text. There is no second unhashed readable copy.
-- `maxPromptChars` is enforced again on the finished transport envelope before
-  any context is written into the browser composer.
-- Text input/output only. There are no native tool calls, structured reasoning,
-  authoritative token counts, or API-grade assurances about model identity.
-- UI selectors are private configuration and may break whenever ChatGPT changes
-  its DOM.
+- the OpenClaw system prompt;
+- conversation history;
+- user and assistant text; and
+- prior tool-result text.
 
-## Data and trust boundary
+Tool-call arguments, hidden reasoning blocks, and image bytes are omitted, but
+the omitted categories do not make the remaining context safe by default. Do
+not use this with credentials, client data, regulated data, private URLs,
+secrets, or workflows where an unexpected data export would be unacceptable.
 
-When this fallback runs, it sends the serialized OpenClaw system prompt,
-conversation history, and prior tool-result text to ChatGPT. Tool-call arguments,
-hidden reasoning blocks, and image bytes are omitted. The plugin refuses
-inference until `acknowledgeDataEgress` is explicitly `true`.
+The provider requires an explicit `acknowledgeDataEgress: true` setting. That
+setting is an acknowledgement, not a privacy guarantee and not an approval from
+OpenAI.
 
-This is a semantic and privacy downgrade:
+## Terms of Use and account risk
 
-- OpenClaw roles are flattened into one web user prompt. ChatGPT does not
-  receive true system/user/tool role precedence.
-- Returned browser text is untrusted model output and can carry indirect prompt
-  injection into later replay.
-- ChatGPT account, project, history, retention, deletion, training/data-control,
-  and subscription policies apply independently of OpenClaw.
-- A persistent browser profile contains account cookies and storage. Keep its
-  directory private, dedicated, excluded from backups, and separate from every
-  normal browser profile.
-- The provider's origin checks are navigation guards, not a general network
-  allowlist. The contained canary's OS/container firewall is the egress
-  boundary; it blocks private, metadata, and reserved destinations while
-  permitting the public ChatGPT web origin. CDP mode cannot prove the attached
-  browser's profile ownership and therefore requires a provider-dedicated
-  browser by policy.
-- Automatic fallback can export context that the operator did not expect to
-  leave OpenClaw. Enable it only for a specifically reviewed agent, never as a
-  global default.
+This project automates the ChatGPT web interface through a browser. It is not
+endorsed by OpenAI and may not be permitted by the current ChatGPT, OpenAI,
+account, workspace, automation, or anti-abuse rules. OpenAI's terms and product
+policies can change. Review the current terms yourself before using this
+project:
 
-## Deterministic validation
+- [OpenAI Terms of Use](https://openai.com/policies/terms-of-use/)
+- [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy/)
+- [ChatGPT help and policies](https://help.openai.com/)
 
-```bash
-npm install
-npm test
-npm run typecheck
-npm run build
-npm run pack:check
-npm audit --omit=dev
-```
+Use can trigger rate limits, verification challenges, loss of access, account
+suspension, account termination, or project/chat restrictions. Do not use an
+account you cannot afford to lose. Do not automate signup, password entry, MFA,
+CAPTCHA handling, or attempts to evade access controls. Confirm that your use
+is allowed for the account, workspace, organization, and data involved. This
+README is a technical warning, not legal advice or a compliance determination.
 
-`build` removes only this project's validated `dist/` path before emitting.
-Tests remain source-only and are excluded from `dist/`. `pack:check` rebuilds,
-runs `npm pack --dry-run --json`, requires `dist/index.js`, and rejects leaked
-test artifacts.
+## Limitations
 
-## Internal installation (separate approval step)
+### It is browser automation, not an API
 
-Do not install this package into the live OpenClaw runtime during development.
-After deterministic checks pass, build a local tarball and install it only into
-an isolated OpenClaw **2026.7.1** config/state directory and port:
+- It depends on the private DOM, selectors, behavior, and anti-automation
+  controls of `chatgpt.com` or a configured ChatGPT Project.
+- A ChatGPT UI change can break readiness detection, submission, response
+  extraction, or receipt validation without a code change here.
+- Responses are buffered pseudo-streams. OpenClaw receives text after the DOM
+  reports a positive completion state, not token-by-token API streaming.
+- There are no native tool calls, structured outputs, authoritative usage
+  counts, guaranteed model identity, or API-level availability guarantees.
+- ChatGPT sign-in challenges, rate limits, outages, account restrictions,
+  project changes, and network failures are external dependencies.
 
-```bash
-npm pack
-export CHATGPT_WEB_CANARY_ROOT="$(mktemp -d /tmp/openclaw-chatgpt-web-canary.XXXXXX)"
-install -d -m 700 "$CHATGPT_WEB_CANARY_ROOT/state"
-printf '{"version":1,"agents":{}}\n' > "$CHATGPT_WEB_CANARY_ROOT/state/exec-approvals.json"
-chmod 600 "$CHATGPT_WEB_CANARY_ROOT/state/exec-approvals.json"
-env \
-  OPENCLAW_STATE_DIR="$CHATGPT_WEB_CANARY_ROOT/state" \
-  OPENCLAW_CONFIG_PATH="$CHATGPT_WEB_CANARY_ROOT/state/openclaw.json" \
-  OPENCLAW_GATEWAY_PORT=19171 \
-  ./node_modules/.bin/openclaw --profile chatgpt-web-canary \
-  plugins install ./openclaw-chatgpt-web-provider-0.1.0.tgz
-```
+### The prompt contract is weaker than a real model API
 
-Use the repository-local CLI above: its OpenClaw 2026.7.1 build commit matches
-the frozen source tag. Pre-creating the isolated approvals file avoids an exact
-2026.7.1 migration path that otherwise probes and archives
-`~/.openclaw/exec-approvals.json` even when `OPENCLAW_STATE_DIR` is set.
+- OpenClaw's system, user, assistant, and tool-result roles are flattened into
+  one web user message. ChatGPT does not receive OpenClaw's original role
+  precedence.
+- Returned text is untrusted model output. It can contain prompt injection or
+  incorrect instructions that affect later OpenClaw behavior.
+- The provider does not expose native tool execution. Tool-result text from
+  earlier turns can still be included in the serialized context.
+- Long contexts can exceed the configured transport limit or the practical
+  limits of the ChatGPT composer. The provider rejects oversized envelopes.
 
-Inspect the isolated runtime with the same environment before starting a
-gateway:
+### The browser session is a real account boundary
 
-```bash
-env \
-  OPENCLAW_STATE_DIR="$CHATGPT_WEB_CANARY_ROOT/state" \
-  OPENCLAW_CONFIG_PATH="$CHATGPT_WEB_CANARY_ROOT/state/openclaw.json" \
-  OPENCLAW_GATEWAY_PORT=19171 \
-  ./node_modules/.bin/openclaw --profile chatgpt-web-canary \
-  plugins inspect chatgpt-web --runtime --json
-```
+- A persistent profile contains cookies, local storage, and account state. Keep
+  it private, dedicated, backed up only deliberately, and separate from normal
+  browser profiles.
+- Launch mode isolates the provider's Chromium profile and creates a fresh
+  provider-owned page per turn. CDP mode cannot prove the attached browser's
+  profile ownership. Use CDP only with a browser dedicated to this provider.
+- The provider checks the configured ChatGPT origin and rejects unexpected
+  top-level navigation, popups, downloads, and transcript mismatches. Those
+  checks are not a complete browser sandbox or network allowlist.
+- The browser may retain chats according to the account, project, history,
+  retention, training, and data-control settings in effect on the account.
 
-Example plugin configuration for that isolated environment:
+### Availability and operational scope
+
+- The supported compatibility target is exactly OpenClaw `2026.7.1` and
+  Playwright Core `1.61.1`. Later OpenClaw releases are unsupported until they
+  pass a new compatibility review.
+- Use this only as a deliberately reviewed, per-agent fallback. Do not put it
+  in `agents.defaults` or use it for automated, high-volume, security-sensitive,
+  client-data, or credential-bearing workflows.
+- This project has no SLA. A successful canary does not establish production
+  reliability or terms compliance.
+
+## Transport and integrity controls
+
+Each turn is serialized and sends one bounded transport envelope to the web
+composer. The envelope contains a unique request marker, a nonce, and a visual
+encoding for the serialized context. The provider verifies the submitted DOM
+user message against the expected envelope and accepts only the immediately
+following assistant response with the matching nonce receipt.
+
+The provider also:
+
+- fails closed until `acknowledgeDataEgress` is true;
+- enforces `maxPromptChars` before filling the composer;
+- cancels and closes the active provider-owned page;
+- rejects unexpected top-level navigation, popups, and downloads; and
+- uses typed failures for authentication, timeout, integrity, browser, and
+  response errors so OpenClaw can classify fallback behavior.
+
+These controls protect the local transport boundary. They do not make the
+ChatGPT website trustworthy, prevent public-web egress by themselves, or
+override account policy.
+
+## Configuration
+
+The minimum launch-mode configuration is:
 
 ```json
 {
@@ -148,7 +137,7 @@ Example plugin configuration for that isolated environment:
         "config": {
           "webchatUrl": "https://chatgpt.com/",
           "mode": "launch",
-          "profileDir": "/absolute/mktemp/canary-root/chromium-profile",
+          "profileDir": "/absolute/path/to/chromium-profile",
           "sandboxMode": "userns",
           "headless": true,
           "acknowledgeDataEgress": true
@@ -159,47 +148,44 @@ Example plugin configuration for that isolated environment:
 }
 ```
 
-`headless: true` uses native Chromium `--headless=new`. The provider normalizes
-the installed Chromium user agent, suppresses the webdriver automation bit, and
-sets stable language/plugin surfaces because ChatGPT did not expose its composer
-to an unmodified headless browser. Normal turns have no `DISPLAY`, no X server,
-and no visible-window fallback.
-`headless: false` is rejected during configuration validation.
+Use the exact HTTPS URL for a ChatGPT Project when needed. The configured and
+final navigation origins must match. `headless: false` is rejected. The only
+visible-browser path is the explicit one-time login helper described below.
 
-## Native-headless contained browser
+The provider's package, peer dependency, and plugin API are pinned to
+`2026.7.1`. Its catalog metadata uses an OpenClaw 2026.7.1-compatible built-in
+adapter identifier, while runtime resolution uses the provider-owned stream
+hook. This is compatibility metadata, not an OpenAI-compatible HTTP endpoint.
 
-Build the internal canary image and verify its egress policy:
+## Isolated canary
+
+Do not begin with the live OpenClaw installation. Use a disposable OS account,
+VM, or the contained runner in [`scripts/contained-canary.sh`](scripts/contained-canary.sh).
+Use a throwaway ChatGPT account or Project and synthetic data only.
+
+Build the contained image and test its network boundary:
 
 ```bash
 ./scripts/contained-canary.sh build
-test -n "$CHATGPT_WEB_CANARY_ROOT"
+export CHATGPT_WEB_CANARY_ROOT="$(mktemp -d /tmp/openclaw-chatgpt-web-canary.XXXXXX)"
 chmod 700 "$CHATGPT_WEB_CANARY_ROOT"
 ./scripts/contained-canary.sh firewall-check
 ```
 
-The runner has no predictable default state path. It requires this explicit,
-private, invoking-user-owned, non-symlink root before any read-write bind mount.
+Normal contained runs block loopback, RFC1918, link-local, cloud metadata,
+CGNAT, reserved, documentation, and multicast destinations. Public HTTP/HTTPS
+and explicit public DNS remain available for the ChatGPT web application. The
+firewall is the egress boundary. Browser request interception alone is not a
+substitute for it.
 
-Normal runs deny all loopback, RFC1918, link-local, carrier-grade NAT,
-documentation/reserved ranges, multicast, and cloud metadata. They permit public
-HTTP/HTTPS plus explicit public DNS. The synthetic fallback-test-only `stub-run`
-mode opens only loopback port 19172 for its local 429 stub; it is not an
-operational provider mode.
-
-`scripts/run-fallback-canary.sh` refuses direct execution and is callable only
-through the contained `stub-run` path, which supplies isolated state/config/
-workspace paths and a unique session key.
-
-One-time authentication is the only visible-browser action, and it occurs only
-when the operator invokes it directly:
+One-time authentication is manual and visible:
 
 ```bash
 ./scripts/contained-canary.sh login
 ```
 
-Sign in, then close that Chromium window. Passwords, MFA values, and cookies are
-never passed to OpenClaw. All subsequent `run` commands are native headless and
-cannot pop up on the desktop:
+After authentication, close the visible browser. Subsequent provider turns use
+native headless Chromium:
 
 ```bash
 ./scripts/contained-canary.sh run -- \
@@ -207,26 +193,20 @@ cannot pop up on the desktop:
   agent --local --agent main --message 'synthetic canary' --json
 ```
 
-For a ChatGPT Project, set `webchatUrl` to its exact project URL. Configured and
-final navigation origins must remain exactly the same HTTPS ChatGPT origin.
+The fallback helper refuses standalone execution. Synthetic fallback testing
+must use the contained `stub-run` path, which supplies isolated state/config/
+workspace paths and a unique session key.
 
-CDP is an advanced recovery mode, not the first canary path:
+For a real external canary, invoke exactly one bounded turn, inspect the
+returned receipt-bound answer, audit retention, and then disable the provider.
+Delete only a conversation whose user DOM contains the exact synthetic
+`OPENCLAW_REQUEST` marker. External turns and account/chat deletion are
+approval-sensitive actions.
 
-```json
-{
-  "mode": "cdp",
-  "cdpUrl": "http://127.0.0.1:9222",
-  "acknowledgeDataEgress": true
-}
-```
+## Fallback placement
 
-Never point CDP at a personal browser or reuse its normal cookies, extensions,
-password manager, tabs, or profile.
-
-## Per-agent fallback placement
-
-Do **not** place this model in `agents.defaults`. Add it last only on the one
-explicitly reviewed agent:
+Keep the provider out of global defaults. Add it last on one explicitly reviewed
+agent only:
 
 ```json
 {
@@ -244,48 +224,23 @@ explicitly reviewed agent:
 }
 ```
 
-Keep it out of automated, high-volume, security-sensitive, client-data, and
-credential-bearing workflows.
+## Development and validation
 
-## Isolated canary protocol
+The repository-local dependency set targets the frozen compatibility contract:
 
-1. Use launch mode in a disposable OS account or VM with a fresh `0700`
-   profile and a throwaway ChatGPT account/project.
-   Deny browser access to all loopback, RFC1918,
-   link-local, carrier-grade NAT, and cloud-metadata destinations at the OS or
-   container network boundary; browser request interception alone is not a
-   substitute for network isolation.
-2. Keep the model out of automatic fallbacks. Invoke `chatgpt-web/backup`
-   directly for exactly one bounded turn.
-3. Use a synthetic system prompt, history, tool result, and unique canary only.
-   Do not include memories, credentials, client data, private URLs, or real tool
-   output.
-4. Verify the returned answer and receipt binding, confirm whether a chat was
-   retained, and delete only a conversation whose user DOM contains the exact
-   `OPENCLAW_REQUEST` marker.
-5. Revert `acknowledgeDataEgress` after the canary. Automatic isolated fallback,
-   fault, and soak testing are later gates.
+```bash
+npm install
+npm test
+npm run typecheck
+npm run build
+npm run pack:check
+npm audit --omit=dev
+```
 
-On 2026-08-02, the contained native-headless path passed a synthetic direct turn
-and a full isolated OpenClaw 2026.7.1 fallback turn. The failing primary received
-exactly one request before `chatgpt-web/backup` returned the expected marker.
-The disabled-egress configuration failed before Chromium launch. A native-
-headless audit of all 28 visible recent conversations found no retained
-`OPENCLAW_REQUEST` marker, so nothing was eligible for deletion. No live gateway,
-live config, or globally installed OpenClaw package was changed.
+The current validation snapshot passed 57 tests, typecheck, build, package
+inspection, production dependency audit, contained firewall checks, and an
+isolated OpenClaw 2026.7.1 install. No external ChatGPT turn is implied by
+those checks.
 
-These proofs validate the internal transport and its isolated fallback path;
-they do not make browser automation API-equivalent or authorize live deployment.
-
-On 2026-08-09, the hardened source state passed 57 unit tests, typecheck,
-package inspection, production dependency audit, and the contained firewall
-check. A fresh isolated OpenClaw 2026.7.1 install exposed
-`chatgpt-web/backup` in model discovery, matched the built `dist/` artifact,
-and blocked egress before browser acquisition when acknowledgement was false.
-No live gateway, browser profile, or external ChatGPT turn was used for this
-validation pass.
-
-After stopping the foreground isolated gateway and reviewing evidence, verify
-the exact temporary path and move it to trash with a literal reviewed target,
-for example `gio trash -- /tmp/openclaw-chatgpt-web-canary.ABC123`. Never run gateway service
-install/start/restart/stop commands for this disposable profile.
+Do not install this package into a live OpenClaw runtime, edit live OpenClaw
+configuration, or restart a live gateway as part of ordinary development.

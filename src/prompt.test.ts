@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import { buildWebchatPrompt } from "./prompt.js";
 
 describe("buildWebchatPrompt", () => {
+  it("renders the selected web model and reasoning level as provider controls", () => {
+    const prompt = buildWebchatPrompt(
+      { messages: [{ role: "user", content: "Solve it.", timestamp: 1 }] },
+      {
+        model: {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          webLabel: "GPT-5",
+        },
+        reasoning: "high",
+      },
+    );
+
+    expect(prompt).toContain("## Requested browser controls");
+    expect(prompt).toContain("ChatGPT web model: GPT-5");
+    expect(prompt).toContain("Requested reasoning effort: high");
+    expect(prompt).toContain("Do not reveal hidden chain-of-thought");
+  });
+
   it("serializes system, conversation, tool results, and the tool protocol", () => {
     const prompt = buildWebchatPrompt({
       systemPrompt: "Be exact.",

@@ -8,21 +8,26 @@ import { describe, expect, it, vi } from "vitest";
 import plugin from "./index.js";
 
 type ProviderRegistration = {
-  catalog?: { run(): Promise<{ provider: { api?: string } }> };
-  staticCatalog?: { run(): Promise<{ provider: { api?: string } }> };
+  catalog?: { run(): Promise<{ provider: { api?: string; models?: Model[] } }> };
+  staticCatalog?: { run(): Promise<{ provider: { api?: string; models?: Model[] } }> };
   resolveSyntheticAuth?(): { apiKey: string };
   resolveDynamicModel?(input: { provider: string; modelId: string }): Model | undefined;
   createStreamFn?(input: { model: Model }): StreamFn | undefined;
   normalizeToolSchemas?(input: { tools: unknown[] }): unknown[];
+  matchesContextOverflowError?(input: { errorMessage: string }): boolean;
   classifyFailoverReason?(input: { errorMessage: string }): string | undefined;
 };
 
-function register(registrationMode: "discovery" | "full", acknowledgeDataEgress = false) {
+function register(
+  registrationMode: "discovery" | "full",
+  acknowledgeDataEgress = false,
+  extraConfig: Record<string, unknown> = {},
+) {
   const providers: ProviderRegistration[] = [];
   const services: OpenClawPluginService[] = [];
   const cleanups: Array<() => void | Promise<void>> = [];
   const api = {
-    pluginConfig: { acknowledgeDataEgress },
+    pluginConfig: { ...extraConfig, acknowledgeDataEgress },
     registrationMode,
     logger: {
       debug: vi.fn(),
@@ -61,16 +66,57 @@ describe("ChatGPT web provider registration", () => {
     const { provider } = register("discovery");
     expect((await provider.catalog?.run())?.provider.api).toBe("openai-completions");
     expect((await provider.staticCatalog?.run())?.provider.api).toBe("openai-completions");
+    expect((await provider.catalog?.run())?.provider.models).toEqual([
+      expect.objectContaining({ contextWindow: 32_768, maxTokens: 8_192 }),
+    ]);
     expect(
       provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.api,
     ).toBe("chatgpt-web");
+    expect(
+      provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.reasoning,
+    ).toBe(false);
     expect(provider.resolveSyntheticAuth?.().apiKey).toBe("chatgpt-web-local");
+  });
+
+  it("registers configured model ids and their reasoning capabilities", async () => {
+    const { provider } = register("discovery", false, {
+      models: [
+        {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          webLabel: "GPT-5",
+          reasoning: true,
+          reasoningOptions: { off: "Auto", high: "Extended" },
+        },
+      ],
+    });
+
+    expect((await provider.catalog?.run())?.provider.models).toEqual([
+      expect.objectContaining({
+        id: "gpt-5",
+        reasoning: true,
+        thinkingLevelMap: expect.objectContaining({ off: "off", low: null, high: "high" }),
+      }),
+    ]);
+    expect(
+      provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "gpt-5" }),
+    ).toMatchObject({ id: "gpt-5", reasoning: true, api: "chatgpt-web" });
   });
 
   it("preserves OpenClaw's live tool catalog for the agent loop", () => {
     const { provider } = register("discovery");
     const tools = [{ name: "read_file" }];
     expect(provider.normalizeToolSchemas?.({ tools })).toBe(tools);
+  });
+
+  it("classifies token-budget failures as context overflow", () => {
+    const { provider } = register("discovery");
+    expect(
+      provider.matchesContextOverflowError?.({
+        errorMessage:
+          "[chatgpt-web:browser] Serialized fallback prompt transport is estimated at 25000 tokens; configured maximum input budget is 24576 tokens",
+      }),
+    ).toBe(true);
   });
 
   it("fails closed at inference without the explicit data-egress acknowledgement", async () => {

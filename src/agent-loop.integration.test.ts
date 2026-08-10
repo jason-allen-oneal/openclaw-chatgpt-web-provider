@@ -11,7 +11,16 @@ const model: Model = {
   api: "chatgpt-web",
   provider: "chatgpt-web",
   baseUrl: "chatgpt-web://local",
-  reasoning: false,
+  reasoning: true,
+  thinkingLevelMap: {
+    off: null,
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+  },
   input: ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: 32_768,
@@ -22,8 +31,10 @@ describe("ChatGPT web provider at the OpenClaw agent-loop boundary", () => {
   it("executes a native tool call and sends its result into the next provider turn", async () => {
     let browserTurns = 0;
     let executedArguments: unknown;
-    const ask = vi.fn(async (prompt: string) => {
+    const ask = vi.fn(async (prompt: string, _signal?: AbortSignal, controls?: { reasoning?: string }) => {
       browserTurns += 1;
+      expect(controls?.reasoning).toBe("high");
+      expect(prompt).toContain("Requested reasoning effort: high");
       if (browserTurns === 1) {
         expect(prompt).toContain("### read_file");
         return 'OPENCLAW_TOOL_CALL {"name":"read_file","arguments":{"path":"README.md"}}';
@@ -64,6 +75,8 @@ describe("ChatGPT web provider at the OpenClaw agent-loop boundary", () => {
       },
       {
         model,
+        thinkingLevel: "high",
+        reasoning: "high",
         convertToLlm: (current: AgentMessage[]): Message[] =>
           current as unknown as Message[],
         toolExecution: "sequential",
@@ -74,7 +87,16 @@ describe("ChatGPT web provider at the OpenClaw agent-loop boundary", () => {
         if (event.type === "tool_execution_end") toolExecutionEnds += 1;
       },
       undefined,
-      createChatGptWebStreamFn({ client, maxPromptChars: 100_000 }),
+      createChatGptWebStreamFn({
+        client,
+        modelConfig: {
+          id: "backup",
+          name: "ChatGPT Web (backup)",
+          reasoning: true,
+          reasoningOptions: { off: "Auto", high: "Extended" },
+        },
+        maxPromptChars: 100_000,
+      }),
     );
 
     const finalMessage = messages.at(-1);

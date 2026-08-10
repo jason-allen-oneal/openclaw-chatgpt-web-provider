@@ -1,9 +1,31 @@
 import path from "node:path";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
+import type { ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
 
 export const CHATGPT_WEB_PROVIDER_ID = "chatgpt-web";
 export const CHATGPT_WEB_MODEL_ID = "backup";
 export const CHATGPT_WEB_AUTH_MARKER = "chatgpt-web-local";
+
+export const CHATGPT_WEB_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const satisfies readonly ModelThinkingLevel[];
+
+export interface ChatGptWebModelConfig {
+  /** Model id used after the provider slash, for example chatgpt-web/gpt-5. */
+  id: string;
+  name: string;
+  reasoning: boolean;
+  /** Exact visible model label understood by the configured ChatGPT web picker. */
+  webLabel?: string;
+  /** Optional exact visible labels for the ChatGPT web reasoning picker. */
+  reasoningOptions: Partial<Record<ModelThinkingLevel, string>>;
+}
 
 export interface ChatGptWebSelectors {
   composer: string;
@@ -14,6 +36,10 @@ export interface ChatGptWebSelectors {
   responseContent: string;
   completion: string;
   stop: string;
+  modelPicker?: string;
+  modelOption?: string;
+  reasoningPicker?: string;
+  reasoningOption?: string;
 }
 
 export interface ChatGptWebConfig {
@@ -29,8 +55,18 @@ export interface ChatGptWebConfig {
   readyTimeoutMs: number;
   responseTimeoutMs: number;
   stabilityWindowMs: number;
+  models: ChatGptWebModelConfig[];
   selectors: ChatGptWebSelectors;
 }
+
+export const CHATGPT_WEB_DEFAULT_MODEL: ChatGptWebModelConfig = {
+  id: CHATGPT_WEB_MODEL_ID,
+  name: "ChatGPT Web (backup)",
+  reasoning: false,
+  reasoningOptions: {},
+};
+
+const DEFAULT_MODELS: ChatGptWebModelConfig[] = [CHATGPT_WEB_DEFAULT_MODEL];
 
 const DEFAULT_SELECTORS: ChatGptWebSelectors = {
   composer:
@@ -60,6 +96,7 @@ const DEFAULT_CONFIG: ChatGptWebConfig = {
   readyTimeoutMs: 30_000,
   responseTimeoutMs: 180_000,
   stabilityWindowMs: 1_500,
+  models: DEFAULT_MODELS,
   selectors: DEFAULT_SELECTORS,
 };
 
@@ -101,6 +138,7 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
       250,
       30_000,
     ),
+    models: readModels(raw.models),
     selectors: {
       composer: readString(selectors.composer, DEFAULT_SELECTORS.composer),
       send: readString(selectors.send, DEFAULT_SELECTORS.send),
@@ -113,8 +151,95 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
       ),
       completion: readString(selectors.completion, DEFAULT_SELECTORS.completion),
       stop: readString(selectors.stop, DEFAULT_SELECTORS.stop),
+      ...(readOptionalString(selectors.modelPicker)
+        ? { modelPicker: readOptionalString(selectors.modelPicker)! }
+        : {}),
+      ...(readOptionalString(selectors.modelOption)
+        ? { modelOption: readOptionalString(selectors.modelOption)! }
+        : {}),
+      ...(readOptionalString(selectors.reasoningPicker)
+        ? { reasoningPicker: readOptionalString(selectors.reasoningPicker)! }
+        : {}),
+      ...(readOptionalString(selectors.reasoningOption)
+        ? { reasoningOption: readOptionalString(selectors.reasoningOption)! }
+        : {}),
     },
   };
+}
+
+function readModels(value: unknown): ChatGptWebModelConfig[] {
+  if (value === undefined) {
+    return DEFAULT_CONFIG.models.map((model) => ({
+      ...model,
+      reasoningOptions: { ...model.reasoningOptions },
+    }));
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("models must be a non-empty array");
+  }
+
+  const ids = new Set<string>();
+  return value.map((entry, index) => {
+    const record = asRecord(entry);
+    const id = readOptionalString(record.id);
+    if (!id || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+      throw new Error(
+        `models[${index}].id must be 1-128 characters using letters, digits, '.', '_', ':', or '-'`,
+      );
+    }
+    if (ids.has(id)) throw new Error(`models contains duplicate id "${id}"`);
+    ids.add(id);
+
+    const webLabel = readOptionalString(record.webLabel);
+    if (id !== CHATGPT_WEB_MODEL_ID && !webLabel) {
+      throw new Error(`models[${index}].webLabel is required for model id "${id}"`);
+    }
+
+    const reasoning = readBoolean(record.reasoning, false);
+    const reasoningOptions = readReasoningOptions(record.reasoningOptions, index);
+    if (!reasoning && Object.keys(reasoningOptions).length > 0) {
+      throw new Error(`models[${index}].reasoningOptions requires reasoning: true`);
+    }
+    if (reasoning && !reasoningOptions.off) {
+      throw new Error(
+        `models[${index}].reasoningOptions.off is required when reasoning is enabled`,
+      );
+    }
+
+    return {
+      id,
+      name: readString(record.name, `ChatGPT Web (${id})`),
+      reasoning,
+      ...(webLabel ? { webLabel } : {}),
+      reasoningOptions,
+    };
+  });
+}
+
+function readReasoningOptions(
+  value: unknown,
+  modelIndex: number,
+): Partial<Record<ModelThinkingLevel, string>> {
+  if (value === undefined) return {};
+  const record = asRecord(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`models[${modelIndex}].reasoningOptions must be an object`);
+  }
+
+  const options: Partial<Record<ModelThinkingLevel, string>> = {};
+  for (const [level, label] of Object.entries(record)) {
+    if (!(CHATGPT_WEB_THINKING_LEVELS as readonly string[]).includes(level)) {
+      throw new Error(`models[${modelIndex}].reasoningOptions has an unknown level "${level}"`);
+    }
+    const normalized = readOptionalString(label);
+    if (!normalized) {
+      throw new Error(
+        `models[${modelIndex}].reasoningOptions.${level} must be a non-empty visible label`,
+      );
+    }
+    options[level as ModelThinkingLevel] = normalized;
+  }
+  return options;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

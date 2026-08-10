@@ -4,12 +4,22 @@ import {
   type AssistantMessage,
   type Usage,
 } from "openclaw/plugin-sdk/llm";
-import type { ChatGptWebClient } from "./browser-client.js";
+import {
+  ChatGptWebError,
+  type ChatGptWebClient,
+  type ChatGptWebTurnControls,
+} from "./browser-client.js";
+import type { ChatGptWebModelConfig } from "./config.js";
+import {
+  estimateTokenUpperBound,
+  resolveChatGptWebTurnLimits,
+} from "./limits.js";
 import { buildWebchatPrompt } from "./prompt.js";
 import { parseOpenClawToolCall } from "./tool-calls.js";
 
 export function createChatGptWebStreamFn(params: {
   client: ChatGptWebClient;
+  modelConfig?: ChatGptWebModelConfig;
   maxPromptChars: number;
 }): StreamFn {
   return (model, context, options) => {
@@ -18,7 +28,49 @@ export function createChatGptWebStreamFn(params: {
     queueMicrotask(() => {
       void (async () => {
         try {
-          const prompt = buildWebchatPrompt(context);
+          const modelConfig =
+            params.modelConfig ??
+            ({
+              id: model.id,
+              name: model.name,
+              reasoning: model.reasoning,
+              reasoningOptions: {},
+            } satisfies ChatGptWebModelConfig);
+          const limits = resolveChatGptWebTurnLimits(model.contextWindow, model.maxTokens);
+          const requestedReasoning = modelConfig.reasoning
+            ? options?.reasoning ?? "off"
+            : options?.reasoning;
+          if (requestedReasoning && requestedReasoning !== "off" && !modelConfig.reasoning) {
+            throw new ChatGptWebError(
+              "browser",
+              `Reasoning level "${requestedReasoning}" is not supported by configured model "${modelConfig.id}"`,
+            );
+          }
+          if (
+            modelConfig.reasoning &&
+            (!requestedReasoning || !modelConfig.reasoningOptions[requestedReasoning])
+          ) {
+            throw new ChatGptWebError(
+              "browser",
+              `Reasoning level "${requestedReasoning ?? "off"}" is not configured for model "${modelConfig.id}"; add its exact ChatGPT web label to reasoningOptions before enabling this model`,
+            );
+          }
+          const controls: ChatGptWebTurnControls = {
+            model: modelConfig,
+            limits,
+            // OpenClaw omits the optional reasoning field for its default off
+            // level. Preserve that semantic so a configured web "off" option
+            // can still be selected and the browser prompt remains explicit.
+            ...(requestedReasoning !== undefined ? { reasoning: requestedReasoning } : {}),
+          };
+          const prompt = buildWebchatPrompt(context, controls);
+          const estimatedPromptTokens = estimateTokenUpperBound(prompt);
+          const inputTokenBudget = limits.contextWindow - limits.maxTokens;
+          if (estimatedPromptTokens > inputTokenBudget) {
+            throw new Error(
+              `Serialized fallback prompt is estimated at ${estimatedPromptTokens} tokens; configured maximum input budget is ${inputTokenBudget} tokens for a ${limits.contextWindow}-token context window after reserving ${limits.maxTokens} output tokens`,
+            );
+          }
           if (prompt.length > params.maxPromptChars) {
             throw new Error(
               `Serialized fallback prompt is ${prompt.length} characters; configured maximum is ${params.maxPromptChars}`,
@@ -28,7 +80,13 @@ export function createChatGptWebStreamFn(params: {
           stream.push({ type: "start", partial: empty });
           // This browser transport is intentionally buffered: it emits one text
           // delta only after the complete, positively terminated DOM response.
-          const text = await params.client.ask(prompt, options?.signal);
+          const text = await params.client.ask(prompt, options?.signal, controls);
+          const estimatedOutputTokens = estimateTokenUpperBound(text);
+          if (estimatedOutputTokens > limits.maxTokens) {
+            throw new Error(
+              `ChatGPT response is estimated at ${estimatedOutputTokens} tokens, above the configured maximum of ${limits.maxTokens} output tokens`,
+            );
+          }
           if (!text.trim()) {
             throw new Error("[chatgpt-web:empty_response] Browser transport returned no text");
           }
@@ -138,7 +196,7 @@ function buildTextMessage(
 }
 
 function estimateUsage(prompt: string, response: string): Usage {
-  return buildUsage(Math.ceil(prompt.length / 4), Math.ceil(response.length / 4));
+  return buildUsage(estimateTokenUpperBound(prompt), estimateTokenUpperBound(response));
 }
 
 function emptyUsage(): Usage {

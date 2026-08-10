@@ -9,6 +9,10 @@ import {
   prepareProfileDirectory,
 } from "./browser-client.js";
 import { resolveChatGptWebConfig, type ChatGptWebConfig } from "./config.js";
+import {
+  CHATGPT_WEB_INPUT_TOKEN_BUDGET,
+  CHATGPT_WEB_MAX_TOKENS,
+} from "./limits.js";
 
 type Message = { role: "assistant" | "user"; text: string; completion?: boolean };
 type SubmitPlan =
@@ -22,6 +26,7 @@ type SubmitPlan =
   | "extra-envelope"
   | "popup"
   | "download"
+  | "long-response"
   | "long-pause";
 
 class FakeClock {
@@ -40,6 +45,11 @@ class FakePage {
   currentUrl = this.configuredUrl;
   filled = "";
   closed = false;
+  modelOptions = ["GPT-5"];
+  reasoningOptions = ["Extended"];
+  selectedModel = "";
+  selectedReasoning = "";
+  noOpSelection = false;
   waitCalls = 0;
   redirectOnSubmit = false;
   redirectWhileWaitingForSend = false;
@@ -72,6 +82,14 @@ class FakePage {
     if (selector === config.selectors.send) return castLocator(new FakeLocator(this, "send"));
     if (selector === config.selectors.message) return castLocator(new FakeLocator(this, "message"));
     if (selector === config.selectors.stop) return castLocator(new FakeLocator(this, "stop"));
+    if (selector === "#model-picker") return castLocator(new FakeLocator(this, "modelPicker"));
+    if (selector === "#model-option") return castLocator(new FakeLocator(this, "modelOption"));
+    if (selector === "#reasoning-picker") {
+      return castLocator(new FakeLocator(this, "reasoningPicker"));
+    }
+    if (selector === "#reasoning-option") {
+      return castLocator(new FakeLocator(this, "reasoningOption"));
+    }
     throw new Error(`unexpected page selector: ${selector}`);
   }
 
@@ -135,7 +153,9 @@ class FakePage {
       return;
     }
     const text =
-      this.plan === "missing-receipt"
+      this.plan === "long-response"
+        ? `${"a".repeat(CHATGPT_WEB_MAX_TOKENS)}\n${receipt}`
+        : this.plan === "missing-receipt"
         ? "answer"
         : this.plan === "wrong-receipt"
           ? "answer\nOPENCLAW_RECEIPT:wrong"
@@ -150,12 +170,30 @@ class FakePage {
 
 class FakeLocator {
   readonly page: FakePage;
-  readonly kind: "completion" | "composer" | "message" | "send" | "stop";
+  readonly kind:
+    | "completion"
+    | "composer"
+    | "message"
+    | "send"
+    | "stop"
+    | "modelPicker"
+    | "modelOption"
+    | "reasoningPicker"
+    | "reasoningOption";
   readonly index: number | undefined;
 
   constructor(
     page: FakePage,
-    kind: "completion" | "composer" | "message" | "send" | "stop",
+    kind:
+      | "completion"
+      | "composer"
+      | "message"
+      | "send"
+      | "stop"
+      | "modelPicker"
+      | "modelOption"
+      | "reasoningPicker"
+      | "reasoningOption",
     index?: number,
   ) {
     this.page = page;
@@ -188,6 +226,9 @@ class FakeLocator {
   async count(): Promise<number> {
     if (this.kind === "message") return this.page.messages.length;
     if (this.kind === "send" || this.kind === "stop" || this.kind === "composer") return 1;
+    if (this.kind === "modelPicker" || this.kind === "reasoningPicker") return 1;
+    if (this.kind === "modelOption") return this.page.modelOptions.length;
+    if (this.kind === "reasoningOption") return this.page.reasoningOptions.length;
     return 0;
   }
 
@@ -204,6 +245,12 @@ class FakeLocator {
   async click(): Promise<void> {
     if (this.kind === "send") this.page.submit();
     if (this.kind === "stop") this.page.stopClicks += 1;
+    if (this.kind === "modelOption" && !this.page.noOpSelection) {
+      this.page.selectedModel = this.page.modelOptions[this.index ?? -1] ?? "";
+    }
+    if (this.kind === "reasoningOption" && !this.page.noOpSelection) {
+      this.page.selectedReasoning = this.page.reasoningOptions[this.index ?? -1] ?? "";
+    }
   }
 
   async isVisible(): Promise<boolean> {
@@ -226,10 +273,24 @@ class FakeLocator {
   }
 
   async innerText(): Promise<string> {
+    if (this.kind === "modelPicker") return this.page.selectedModel;
+    if (this.kind === "reasoningPicker") return this.page.selectedReasoning;
+    if (this.kind === "modelOption") return this.page.modelOptions[this.index ?? -1] ?? "";
+    if (this.kind === "reasoningOption") {
+      return this.page.reasoningOptions[this.index ?? -1] ?? "";
+    }
     return this.page.messages[this.index ?? -1]?.text ?? "";
   }
 
   async getAttribute(name: string): Promise<string | null> {
+    if (name === "aria-selected" && this.kind === "modelOption") {
+      return this.page.selectedModel === this.page.modelOptions[this.index ?? -1] ? "true" : "false";
+    }
+    if (name === "aria-selected" && this.kind === "reasoningOption") {
+      return this.page.selectedReasoning === this.page.reasoningOptions[this.index ?? -1]
+        ? "true"
+        : "false";
+    }
     if (name !== "data-message-author-role") return null;
     return this.page.messages[this.index ?? -1]?.role ?? null;
   }
@@ -381,6 +442,148 @@ describe("PlaywrightChatGptWebClient", () => {
     expect(context.close).toHaveBeenCalledTimes(2);
   });
 
+  it("selects configured web model and reasoning options before submission", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    const context = new FakeContext([page]);
+    const config = {
+      ...testConfig(await temporaryProfile()),
+      selectors: {
+        ...testConfig("").selectors,
+        modelPicker: "#model-picker",
+        modelOption: "#model-option",
+        reasoningPicker: "#reasoning-picker",
+        reasoningOption: "#reasoning-option",
+      },
+    };
+    const client = new PlaywrightChatGptWebClient(config, {}, {
+      automation: {
+        connectOverCDP: vi.fn(),
+        launchPersistentContext: vi.fn(async () => castContext(context)),
+      },
+      nonceFactory: () => "nonce-1",
+      now: clock.now,
+    });
+
+    await expect(
+      client.ask("prompt", undefined, {
+        model: {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          reasoning: true,
+          webLabel: "GPT-5",
+          reasoningOptions: { high: "Extended" },
+        },
+        reasoning: "high",
+      }),
+    ).resolves.toBe("answer");
+    expect(page.selectedModel).toBe("GPT-5");
+    expect(page.selectedReasoning).toBe("Extended");
+    await client.close();
+  });
+
+  it("fails closed when a requested web model has no picker selectors", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig(await temporaryProfile()),
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-1",
+        now: clock.now,
+      },
+    );
+
+    await expect(
+      client.ask("prompt", undefined, {
+        model: {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          reasoning: true,
+          webLabel: "GPT-5",
+          reasoningOptions: {},
+        },
+      }),
+    ).rejects.toThrow(/selectors\.modelPicker/);
+    expect(page.filled).toBe("");
+    await client.close();
+  });
+
+  it("fails closed when a requested reasoning level has no picker selectors", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig(await temporaryProfile()),
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-1",
+        now: clock.now,
+      },
+    );
+
+    await expect(
+      client.ask("prompt", undefined, {
+        model: {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          reasoning: true,
+          reasoningOptions: { high: "Extended" },
+        },
+        reasoning: "high",
+      }),
+    ).rejects.toThrow(/selectors\.reasoningPicker/);
+    expect(page.filled).toBe("");
+    await client.close();
+  });
+
+  it("rejects a picker click that does not report committed state", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    page.noOpSelection = true;
+    const context = new FakeContext([page]);
+    const base = testConfig(await temporaryProfile());
+    const config = {
+      ...base,
+      selectors: {
+        ...base.selectors,
+        modelPicker: "#model-picker",
+        modelOption: "#model-option",
+      },
+    };
+    const client = new PlaywrightChatGptWebClient(config, {}, {
+      automation: {
+        connectOverCDP: vi.fn(),
+        launchPersistentContext: vi.fn(async () => castContext(context)),
+      },
+      nonceFactory: () => "nonce-1",
+      now: clock.now,
+    });
+
+    await expect(
+      client.ask("prompt", undefined, {
+        model: {
+          id: "gpt-5",
+          name: "ChatGPT Web GPT-5",
+          reasoning: true,
+          webLabel: "GPT-5",
+          reasoningOptions: {},
+        },
+      }),
+    ).rejects.toThrow(/did not report a committed selection/);
+    expect(page.filled).toBe("");
+    await client.close();
+  });
+
   it("serializes concurrent turns before acquiring the next browser context", async () => {
     const clock = new FakeClock();
     const firstPage = new FakePage(clock, "success");
@@ -435,6 +638,98 @@ describe("PlaywrightChatGptWebClient", () => {
     expect(page.filled).toBe("");
     expect(page.closed).toBe(true);
     expect(context.close).toHaveBeenCalledOnce();
+    await client.close();
+  });
+
+  it("enforces the combined encoded input and output token budget", async () => {
+    const clock = new FakeClock();
+    const safePage = new FakePage(clock, "success");
+    const safeContext = new FakeContext([safePage]);
+    const safeClient = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(safeContext)),
+        },
+        nonceFactory: () => "nonce-safe",
+        now: clock.now,
+      },
+    );
+
+    await expect(safeClient.ask("a".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET - 1_000))).resolves.toBe(
+      "answer",
+    );
+    await safeClient.close();
+
+    const overPage = new FakePage(clock, "success");
+    const overContext = new FakeContext([overPage]);
+    const overClient = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(overContext)),
+        },
+        nonceFactory: () => "nonce-over",
+        now: clock.now,
+      },
+    );
+
+    await expect(overClient.ask("a".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET))).rejects.toThrow(
+      /configured maximum input budget/,
+    );
+    expect(overPage.filled).toBe("");
+    await overClient.close();
+  });
+
+  it("uses the encoded byte upper bound for high-density input", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-dense",
+        now: clock.now,
+      },
+    );
+
+    await expect(client.ask("é".repeat(8_000))).rejects.toThrow(
+      /configured maximum input budget/,
+    );
+    expect(page.filled).toBe("");
+    await client.close();
+  });
+
+  it("stops and rejects a browser response above the output budget", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "long-response");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig(await temporaryProfile()),
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-output",
+        now: clock.now,
+      },
+    );
+
+    await expect(client.ask("small prompt")).rejects.toThrow(
+      /configured maximum of 8192 output tokens/,
+    );
+    expect(page.stopClicks).toBe(1);
     await client.close();
   });
 

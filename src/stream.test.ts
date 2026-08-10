@@ -1,6 +1,8 @@
 import type { Model, Tool } from "openclaw/plugin-sdk/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatGptWebClient } from "./browser-client.js";
+import type { ChatGptWebModelConfig } from "./config.js";
+import { CHATGPT_WEB_INPUT_TOKEN_BUDGET } from "./limits.js";
 import { createChatGptWebStreamFn } from "./stream.js";
 
 const model: Model = {
@@ -25,6 +27,14 @@ const readFileTool: Tool = {
     required: ["path"],
     additionalProperties: false,
   },
+};
+
+const configuredModel: ChatGptWebModelConfig = {
+  id: "gpt-5",
+  name: "ChatGPT Web GPT-5",
+  webLabel: "GPT-5",
+  reasoning: true,
+  reasoningOptions: { off: "Auto", high: "Extended" },
 };
 
 describe("createChatGptWebStreamFn", () => {
@@ -52,6 +62,44 @@ describe("createChatGptWebStreamFn", () => {
       partial: { content: [{ type: "text", text: "" }] },
     });
     expect(result.content).toEqual([{ type: "text", text: "fallback answer" }]);
+  });
+
+  it("passes OpenClaw model and reasoning controls to the browser client", async () => {
+    const ask = vi.fn().mockResolvedValue("controlled answer");
+    const stream = await createChatGptWebStreamFn({
+      client: { ask },
+      modelConfig: configuredModel,
+      maxPromptChars: 100_000,
+    })(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] }, { reasoning: "high" });
+    for await (const _event of stream) {
+      // Drain the protocol.
+    }
+
+    expect(ask).toHaveBeenCalledWith(
+      expect.stringContaining("ChatGPT web model: GPT-5"),
+      undefined,
+      {
+        model: configuredModel,
+        reasoning: "high",
+        limits: { contextWindow: 32_768, maxTokens: 8_192 },
+      },
+    );
+    expect(ask.mock.calls[0]?.[0]).toContain("Requested reasoning effort: high");
+  });
+
+  it("fails before browser egress when a requested reasoning level is unmapped", async () => {
+    const ask = vi.fn();
+    const stream = await createChatGptWebStreamFn({
+      client: { ask },
+      modelConfig: configuredModel,
+      maxPromptChars: 100_000,
+    })(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] }, { reasoning: "low" });
+    for await (const _event of stream) {
+      // Drain the protocol.
+    }
+
+    expect(ask).not.toHaveBeenCalled();
+    expect((await stream.result()).errorMessage).toMatch(/low.*not configured/);
   });
 
   it("emits a validated native OpenClaw tool call from the browser response", async () => {
@@ -152,6 +200,27 @@ describe("createChatGptWebStreamFn", () => {
     );
   });
 
+  it("rejects leading prose before a browser tool marker", async () => {
+    const stream = await createChatGptWebStreamFn({
+      client: {
+        ask: vi.fn().mockResolvedValue(
+          'I will use a tool.\nOPENCLAW_TOOL_CALL {"name":"read_file","arguments":{"path":"README.md"}}',
+        ),
+      },
+      maxPromptChars: 100_000,
+    })(model, {
+      tools: [readFileTool],
+      messages: [{ role: "user", content: "Do the task.", timestamp: 1 }],
+    });
+    const events = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.map((event) => event.type)).toEqual(["start", "error"]);
+    expect((await stream.result()).errorMessage).toMatch(
+      /tool-call marker must be at the beginning/,
+    );
+  });
+
   it("returns a protocol error when the browser request fails", async () => {
     const client: ChatGptWebClient = {
       ask: vi.fn().mockRejectedValue(new Error("browser unavailable")),
@@ -186,6 +255,34 @@ describe("createChatGptWebStreamFn", () => {
     }
     expect((await stream.result()).errorMessage).toMatch(/configured maximum/);
     expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("rejects a raw serialized prompt that cannot fit beside the output reservation", async () => {
+    const ask = vi.fn();
+    const stream = await createChatGptWebStreamFn({
+      client: { ask },
+      maxPromptChars: 60_000,
+    })(model, {
+      messages: [{ role: "user", content: "x".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET), timestamp: 1 }],
+    });
+    for await (const _event of stream) {
+      // Drain the protocol.
+    }
+
+    expect((await stream.result()).errorMessage).toMatch(/configured maximum input budget/);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized response from a browser client before emitting it", async () => {
+    const stream = await createChatGptWebStreamFn({
+      client: { ask: vi.fn().mockResolvedValue("a".repeat(8_193)) },
+      maxPromptChars: 60_000,
+    })(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] });
+    const events = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.map((event) => event.type)).toEqual(["start", "error"]);
+    expect((await stream.result()).errorMessage).toMatch(/above the configured maximum/);
   });
 
   it("reports abort using the OpenClaw aborted stop reason", async () => {

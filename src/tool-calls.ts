@@ -20,7 +20,13 @@ export function parseOpenClawToolCall(
   tools: readonly Tool[],
 ): ToolCall | undefined {
   const trimmed = content.trim();
-  if (!trimmed.startsWith(OPENCLAW_TOOL_CALL_PREFIX)) return undefined;
+  const markerIndex = trimmed.indexOf(OPENCLAW_TOOL_CALL_PREFIX);
+  if (markerIndex < 0) return undefined;
+  if (markerIndex !== 0) {
+    throw new Error(
+      "Malformed OpenClaw tool call: the tool-call marker must be at the beginning with no leading prose.",
+    );
+  }
 
   const json = trimmed.slice(OPENCLAW_TOOL_CALL_PREFIX.length).trim();
   if (!json.startsWith("{") || !json.endsWith("}")) {

@@ -130,7 +130,12 @@ following assistant response with the matching nonce receipt.
 The provider also:
 
 - fails closed until `acknowledgeDataEgress` is true;
-- enforces `maxPromptChars` before filling the composer;
+- reserves the declared 8,192 output tokens inside the declared 32,768-token
+  context window;
+- enforces a conservative UTF-8 byte upper bound on the fully encoded browser
+  envelope before filling the composer, leaving at most 24,576 input tokens;
+- enforces `maxPromptChars` as a secondary transport safety limit;
+- stops and rejects browser responses that exceed the declared output budget;
 - cancels and closes the active provider-owned page;
 - in CDP mode, cleanup may also close the attached Chromium process, so the CDP
   browser must be dedicated to this provider;

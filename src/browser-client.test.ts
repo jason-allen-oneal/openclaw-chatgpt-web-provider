@@ -9,6 +9,10 @@ import {
   prepareProfileDirectory,
 } from "./browser-client.js";
 import { resolveChatGptWebConfig, type ChatGptWebConfig } from "./config.js";
+import {
+  CHATGPT_WEB_INPUT_TOKEN_BUDGET,
+  CHATGPT_WEB_MAX_TOKENS,
+} from "./limits.js";
 
 type Message = { role: "assistant" | "user"; text: string; completion?: boolean };
 type SubmitPlan =
@@ -22,6 +26,7 @@ type SubmitPlan =
   | "extra-envelope"
   | "popup"
   | "download"
+  | "long-response"
   | "long-pause";
 
 class FakeClock {
@@ -148,7 +153,9 @@ class FakePage {
       return;
     }
     const text =
-      this.plan === "missing-receipt"
+      this.plan === "long-response"
+        ? `${"a".repeat(CHATGPT_WEB_MAX_TOKENS)}\n${receipt}`
+        : this.plan === "missing-receipt"
         ? "answer"
         : this.plan === "wrong-receipt"
           ? "answer\nOPENCLAW_RECEIPT:wrong"
@@ -631,6 +638,98 @@ describe("PlaywrightChatGptWebClient", () => {
     expect(page.filled).toBe("");
     expect(page.closed).toBe(true);
     expect(context.close).toHaveBeenCalledOnce();
+    await client.close();
+  });
+
+  it("enforces the combined encoded input and output token budget", async () => {
+    const clock = new FakeClock();
+    const safePage = new FakePage(clock, "success");
+    const safeContext = new FakeContext([safePage]);
+    const safeClient = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(safeContext)),
+        },
+        nonceFactory: () => "nonce-safe",
+        now: clock.now,
+      },
+    );
+
+    await expect(safeClient.ask("a".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET - 1_000))).resolves.toBe(
+      "answer",
+    );
+    await safeClient.close();
+
+    const overPage = new FakePage(clock, "success");
+    const overContext = new FakeContext([overPage]);
+    const overClient = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(overContext)),
+        },
+        nonceFactory: () => "nonce-over",
+        now: clock.now,
+      },
+    );
+
+    await expect(overClient.ask("a".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET))).rejects.toThrow(
+      /configured maximum input budget/,
+    );
+    expect(overPage.filled).toBe("");
+    await overClient.close();
+  });
+
+  it("uses the encoded byte upper bound for high-density input", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "success");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-dense",
+        now: clock.now,
+      },
+    );
+
+    await expect(client.ask("é".repeat(8_000))).rejects.toThrow(
+      /configured maximum input budget/,
+    );
+    expect(page.filled).toBe("");
+    await client.close();
+  });
+
+  it("stops and rejects a browser response above the output budget", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "long-response");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig(await temporaryProfile()),
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-output",
+        now: clock.now,
+      },
+    );
+
+    await expect(client.ask("small prompt")).rejects.toThrow(
+      /configured maximum of 8192 output tokens/,
+    );
+    expect(page.stopClicks).toBe(1);
     await client.close();
   });
 

@@ -12,6 +12,10 @@ import {
   type ChatGptWebModelConfig,
 } from "./config.js";
 import type { ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
+import {
+  CHATGPT_WEB_CONTEXT_WINDOW,
+  CHATGPT_WEB_MAX_TOKENS,
+} from "./limits.js";
 import { createChatGptWebStreamFn } from "./stream.js";
 
 const CHATGPT_WEB_API = "chatgpt-web";
@@ -112,7 +116,9 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       normalizeToolSchemas: ({ tools }) => tools,
       resolveReasoningOutputMode: () => "native",
       matchesContextOverflowError: ({ errorMessage }) =>
-        /serialized fallback prompt .* configured maximum/i.test(errorMessage),
+        /serialized fallback prompt .* (?:configured maximum|input budget|context window)/i.test(
+          errorMessage,
+        ),
       classifyFailoverReason: ({ errorMessage }) =>
         classifyChatGptWebFailure(errorMessage),
     });
@@ -131,8 +137,8 @@ function toCatalogModel(modelConfig: ChatGptWebModelConfig) {
       : {}),
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 32_768,
-    maxTokens: 8_192,
+    contextWindow: CHATGPT_WEB_CONTEXT_WINDOW,
+    maxTokens: CHATGPT_WEB_MAX_TOKENS,
   };
 }
 

@@ -14,6 +14,7 @@ type ProviderRegistration = {
   resolveDynamicModel?(input: { provider: string; modelId: string }): Model | undefined;
   createStreamFn?(input: { model: Model }): StreamFn | undefined;
   normalizeToolSchemas?(input: { tools: unknown[] }): unknown[];
+  matchesContextOverflowError?(input: { errorMessage: string }): boolean;
   classifyFailoverReason?(input: { errorMessage: string }): string | undefined;
 };
 
@@ -65,6 +66,9 @@ describe("ChatGPT web provider registration", () => {
     const { provider } = register("discovery");
     expect((await provider.catalog?.run())?.provider.api).toBe("openai-completions");
     expect((await provider.staticCatalog?.run())?.provider.api).toBe("openai-completions");
+    expect((await provider.catalog?.run())?.provider.models).toEqual([
+      expect.objectContaining({ contextWindow: 32_768, maxTokens: 8_192 }),
+    ]);
     expect(
       provider.resolveDynamicModel?.({ provider: "chatgpt-web", modelId: "backup" })?.api,
     ).toBe("chatgpt-web");
@@ -103,6 +107,16 @@ describe("ChatGPT web provider registration", () => {
     const { provider } = register("discovery");
     const tools = [{ name: "read_file" }];
     expect(provider.normalizeToolSchemas?.({ tools })).toBe(tools);
+  });
+
+  it("classifies token-budget failures as context overflow", () => {
+    const { provider } = register("discovery");
+    expect(
+      provider.matchesContextOverflowError?.({
+        errorMessage:
+          "[chatgpt-web:browser] Serialized fallback prompt transport is estimated at 25000 tokens; configured maximum input budget is 24576 tokens",
+      }),
+    ).toBe(true);
   });
 
   it("fails closed at inference without the explicit data-egress acknowledgement", async () => {

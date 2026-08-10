@@ -24,6 +24,11 @@ import {
 } from "playwright-core";
 import type { ChatGptWebConfig } from "./config.js";
 import type { ChatGptWebModelConfig } from "./config.js";
+import {
+  estimateTokenUpperBound,
+  resolveChatGptWebTurnLimits,
+  type ChatGptWebTurnLimits,
+} from "./limits.js";
 import type { ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
 
 export interface BrowserClientLogger {
@@ -44,6 +49,7 @@ export interface ChatGptWebClient {
 export interface ChatGptWebTurnControls {
   model?: ChatGptWebModelConfig;
   reasoning?: ModelThinkingLevel;
+  limits?: ChatGptWebTurnLimits;
 }
 
 export interface BrowserAutomation {
@@ -334,6 +340,10 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     signal: AbortSignal,
     controls?: ChatGptWebTurnControls,
   ): Promise<string> {
+    const limits = resolveChatGptWebTurnLimits(
+      controls?.limits?.contextWindow,
+      controls?.limits?.maxTokens,
+    );
     try {
       await page.goto(this.#config.webchatUrl, { waitUntil: "domcontentloaded" });
     } catch (error) {
@@ -378,6 +388,14 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     const boundPromptDigest = createHash("sha256")
       .update(canonicalizeTransportEnvelope(boundPrompt))
       .digest("hex");
+    const estimatedInputTokens = estimateTokenUpperBound(boundPrompt);
+    const inputTokenBudget = limits.contextWindow - limits.maxTokens;
+    if (estimatedInputTokens > inputTokenBudget) {
+      throw new ChatGptWebError(
+        "browser",
+        `Serialized fallback prompt transport is estimated at ${estimatedInputTokens} tokens; configured maximum input budget is ${inputTokenBudget} tokens for a ${limits.contextWindow}-token context window after reserving ${limits.maxTokens} output tokens`,
+      );
+    }
     if (boundPrompt.length > this.#config.maxPromptChars) {
       throw new ChatGptWebError(
         "browser",
@@ -402,10 +420,16 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       signal,
     );
 
-    const response = await this.#waitForResponse(page, submittedIndex, signal);
+    const response = await this.#waitForResponse(
+      page,
+      submittedIndex,
+      signal,
+      limits.maxTokens,
+    );
     assertExpectedOrigin(page.url(), this.#config.webchatUrl);
     const rawText = await extractResponseText(response, this.#config.selectors.responseContent);
     assertExpectedOrigin(page.url(), this.#config.webchatUrl);
+    assertResponseWithinBudget(rawText, limits.maxTokens);
     const text = stripExactReceipt(rawText, receipt);
     if (!text) {
       throw new ChatGptWebError("empty_response", "ChatGPT returned an empty browser response");
@@ -508,6 +532,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     page: Page,
     submittedIndex: number,
     signal: AbortSignal,
+    maxOutputTokens: number,
   ): Promise<Locator> {
     const deadline = this.#now() + this.#config.responseTimeoutMs;
     let lastText = "";
@@ -536,6 +561,13 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         latest,
         this.#config.selectors.responseContent,
       ).catch(() => "");
+      if (estimateTokenUpperBound(text) > maxOutputTokens) {
+        await page.locator(this.#config.selectors.stop).first().click().catch(() => undefined);
+        throw new ChatGptWebError(
+          "browser",
+          `ChatGPT response is estimated at more than the configured maximum of ${maxOutputTokens} output tokens; generation was stopped`,
+        );
+      }
       const stopVisible = await page
         .locator(this.#config.selectors.stop)
         .first()
@@ -1025,6 +1057,16 @@ function closedError(): ChatGptWebError {
 
 function renderError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function assertResponseWithinBudget(text: string, maxOutputTokens: number): void {
+  const estimatedOutputTokens = estimateTokenUpperBound(text);
+  if (estimatedOutputTokens > maxOutputTokens) {
+    throw new ChatGptWebError(
+      "browser",
+      `ChatGPT response is estimated at ${estimatedOutputTokens} tokens, above the configured maximum of ${maxOutputTokens} output tokens`,
+    );
+  }
 }
 
 function installPageBoundaryGuards(page: Page, expectedUrl: string): {

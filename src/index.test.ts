@@ -20,14 +20,13 @@ type ProviderRegistration = {
 
 function register(
   registrationMode: "discovery" | "full",
-  acknowledgeDataEgress = false,
   extraConfig: Record<string, unknown> = {},
 ) {
   const providers: ProviderRegistration[] = [];
   const services: OpenClawPluginService[] = [];
   const cleanups: Array<() => void | Promise<void>> = [];
   const api = {
-    pluginConfig: { ...extraConfig, acknowledgeDataEgress },
+    pluginConfig: extraConfig,
     registrationMode,
     logger: {
       debug: vi.fn(),
@@ -48,19 +47,6 @@ function register(
   return { api, provider: providers[0]!, services, cleanups };
 }
 
-const model: Model = {
-  id: "backup",
-  name: "ChatGPT Web",
-  api: "chatgpt-web",
-  provider: "chatgpt-web",
-  baseUrl: "chatgpt-web://local",
-  reasoning: false,
-  input: ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 32_768,
-  maxTokens: 8_192,
-};
-
 describe("ChatGPT web provider registration", () => {
   it("registers exact custom API catalog and dynamic model identities", async () => {
     const { provider } = register("discovery");
@@ -79,7 +65,7 @@ describe("ChatGPT web provider registration", () => {
   });
 
   it("registers configured model ids and their reasoning capabilities", async () => {
-    const { provider } = register("discovery", false, {
+    const { provider } = register("discovery", {
       models: [
         {
           id: "gpt-5",
@@ -117,21 +103,6 @@ describe("ChatGPT web provider registration", () => {
           "[chatgpt-web:browser] Serialized fallback prompt transport is estimated at 25000 tokens; configured maximum input budget is 24576 tokens",
       }),
     ).toBe(true);
-  });
-
-  it("fails closed at inference without the explicit data-egress acknowledgement", async () => {
-    const { provider } = register("discovery", false);
-    const streamFn = provider.createStreamFn?.({ model });
-    expect(streamFn).toBeTypeOf("function");
-    const stream = await streamFn!(model, {
-      messages: [{ role: "user", content: "synthetic", timestamp: 1 }],
-    });
-    for await (const _event of stream) {
-      // Drain the buffered protocol.
-    }
-    const result = await stream.result();
-    expect(result.stopReason).toBe("error");
-    expect(result.errorMessage).toMatch(/acknowledgeDataEgress is true/);
   });
 
   it("registers idempotent cleanup in discovery and a service in full mode", async () => {

@@ -82,9 +82,6 @@
           true
         ]
       },
-      "acknowledgeDataEgress": {
-        "type": "boolean"
-      },
       "maxPromptChars": {
         "type": "integer",
         "minimum": 1000,

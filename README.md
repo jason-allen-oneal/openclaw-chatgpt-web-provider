@@ -31,9 +31,9 @@ message content, URLs, or other sensitive values. Do not use this with
 credentials, client data, regulated data, private URLs, secrets, or workflows
 where an unexpected data export would be unacceptable.
 
-The provider requires an explicit `acknowledgeDataEgress: true` setting. That
-setting is an acknowledgement, not a privacy guarantee and not an approval from
-OpenAI.
+There is no built-in privacy or data-export approval gate. Treat every enabled
+turn as an explicit operational decision: the serialized context can leave
+OpenClaw and be retained by the ChatGPT account.
 
 ## Terms of Use and account risk
 
@@ -129,7 +129,6 @@ following assistant response with the matching nonce receipt.
 
 The provider also:
 
-- fails closed until `acknowledgeDataEgress` is true;
 - reserves the declared 8,192 output tokens inside the declared 32,768-token
   context window;
 - enforces a conservative UTF-8 byte upper bound on the fully encoded browser
@@ -190,8 +189,7 @@ The minimum launch-mode configuration is:
           "mode": "launch",
           "profileDir": "/absolute/path/to/chromium-profile",
           "sandboxMode": "userns",
-          "headless": true,
-          "acknowledgeDataEgress": true
+          "headless": true
         }
       }
     }

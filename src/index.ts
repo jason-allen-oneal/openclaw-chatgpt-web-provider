@@ -3,7 +3,7 @@ import {
   type OpenClawPluginApi,
   type OpenClawPluginDefinition,
 } from "openclaw/plugin-sdk/plugin-entry";
-import { ChatGptWebError, PlaywrightChatGptWebClient } from "./browser-client.js";
+import { PlaywrightChatGptWebClient } from "./browser-client.js";
 import {
   CHATGPT_WEB_AUTH_MARKER,
   CHATGPT_WEB_PROVIDER_ID,
@@ -32,16 +32,6 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     const config = resolveChatGptWebConfig(api.pluginConfig);
     const catalogModels = config.models.map(toCatalogModel);
     const browserClient = new PlaywrightChatGptWebClient(config, api.logger);
-    const client = config.acknowledgeDataEgress
-      ? browserClient
-      : {
-          async ask(): Promise<string> {
-            throw new ChatGptWebError(
-              "auth",
-              "ChatGPT web fallback is blocked until plugins.entries.chatgpt-web.config.acknowledgeDataEgress is true",
-            );
-          },
-        };
 
     api.lifecycle.registerRuntimeLifecycle({
       id: "chatgpt-web-browser-lifecycle",
@@ -101,7 +91,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
         const modelConfig = config.models.find((candidate) => candidate.id === model.id);
         return modelConfig
           ? createChatGptWebStreamFn({
-              client,
+              client: browserClient,
               modelConfig,
               maxPromptChars: config.maxPromptChars,
             })

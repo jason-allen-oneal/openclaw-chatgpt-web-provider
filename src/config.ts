@@ -50,7 +50,6 @@ export interface ChatGptWebConfig {
   executablePath?: string;
   sandboxMode: "default" | "userns";
   headless: boolean;
-  acknowledgeDataEgress: boolean;
   maxPromptChars: number;
   readyTimeoutMs: number;
   responseTimeoutMs: number;
@@ -91,7 +90,6 @@ const DEFAULT_CONFIG: ChatGptWebConfig = {
   cdpUrl: "http://127.0.0.1:9222",
   sandboxMode: "default",
   headless: true,
-  acknowledgeDataEgress: false,
   maxPromptChars: 50_000,
   readyTimeoutMs: 30_000,
   responseTimeoutMs: 180_000,
@@ -115,10 +113,6 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
       : {}),
     sandboxMode: raw.sandboxMode === "userns" ? "userns" : "default",
     headless: readHeadless(raw.headless),
-    acknowledgeDataEgress: readBoolean(
-      raw.acknowledgeDataEgress,
-      DEFAULT_CONFIG.acknowledgeDataEgress,
-    ),
     maxPromptChars: readInteger(raw.maxPromptChars, DEFAULT_CONFIG.maxPromptChars, 1_000, 60_000),
     readyTimeoutMs: readInteger(
       raw.readyTimeoutMs,

@@ -9,7 +9,6 @@ describe("resolveChatGptWebConfig", () => {
     expect(config.webchatUrl).toBe("https://chatgpt.com/");
     expect(config.sandboxMode).toBe("default");
     expect(config.headless).toBe(true);
-    expect(config.acknowledgeDataEgress).toBe(false);
   });
 
   it("accepts project and selector overrides", () => {
@@ -17,14 +16,12 @@ describe("resolveChatGptWebConfig", () => {
       webchatUrl: "https://chatgpt.com/g/example/project",
       mode: "cdp",
       sandboxMode: "userns",
-      acknowledgeDataEgress: true,
       selectors: { composer: "[data-test=prompt]" },
     });
     expect(config.mode).toBe("cdp");
     expect(config.webchatUrl).toBe("https://chatgpt.com/g/example/project");
     expect(config.sandboxMode).toBe("userns");
     expect(config.selectors.composer).toBe("[data-test=prompt]");
-    expect(config.acknowledgeDataEgress).toBe(true);
   });
 
   it("accepts explicit OpenClaw models and web picker labels", () => {

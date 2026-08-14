@@ -12,7 +12,6 @@ const client = new PlaywrightChatGptWebClient(
       executablePath: "/usr/bin/chromium",
       sandboxMode: "userns",
       headless: true,
-      acknowledgeDataEgress: true,
     }),
     readyTimeoutMs: 60_000,
     responseTimeoutMs: 120_000,

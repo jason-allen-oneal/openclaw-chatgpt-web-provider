@@ -962,6 +962,46 @@ describe("PlaywrightChatGptWebClient", () => {
     expect(context.close).not.toHaveBeenCalled();
   });
 
+  it("reconnects the CDP transport for each serialized turn", async () => {
+    const clock = new FakeClock();
+    const firstContext = new FakeContext([new FakePage(clock, "success")]);
+    const secondContext = new FakeContext([new FakePage(clock, "success")]);
+    const firstBrowser = {
+      contexts: () => [castContext(firstContext)],
+      close: vi.fn(async () => {}),
+      once: vi.fn(),
+    } as unknown as Browser;
+    const secondBrowser = {
+      contexts: () => [castContext(secondContext)],
+      close: vi.fn(async () => {}),
+      once: vi.fn(),
+    } as unknown as Browser;
+    const connectOverCDP = vi
+      .fn<() => Promise<Browser>>()
+      .mockResolvedValueOnce(firstBrowser)
+      .mockResolvedValueOnce(secondBrowser);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig("/unused", "cdp"),
+      {},
+      {
+        automation: {
+          connectOverCDP,
+          launchPersistentContext: vi.fn(),
+        },
+        nonceFactory: () => "nonce-1",
+        now: clock.now,
+      },
+    );
+
+    await expect(client.ask("first turn")).resolves.toBe("answer");
+    await expect(client.ask("second turn")).resolves.toBe("answer");
+
+    expect(connectOverCDP).toHaveBeenCalledTimes(2);
+    expect(firstBrowser.close).toHaveBeenCalledOnce();
+    expect(secondBrowser.close).toHaveBeenCalledOnce();
+    await client.close();
+  });
+
   it("reconnects once when a new context crashes before creating its page", async () => {
     const clock = new FakeClock();
     const firstContext = new FakeContext([]);

@@ -27,7 +27,7 @@ const CHATGPT_WEB_CATALOG_API = "openai-completions";
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: CHATGPT_WEB_PROVIDER_ID,
   name: "ChatGPT Web Backup Provider",
-  description: "Native-headless ChatGPT fallback provider pinned to OpenClaw 2026.7.1",
+  description: "Native-headless ChatGPT fallback provider pinned to OpenClaw 2026.8.1",
   register(api: OpenClawPluginApi) {
     const config = resolveChatGptWebConfig(api.pluginConfig);
     const catalogModels = config.models.map(toCatalogModel);

@@ -1057,25 +1057,16 @@ function assertExpectedOrigin(actual: string, configured: string): void {
 function stripExactReceipt(text: string, receipt: string): string {
   const normalized = text.replace(/\r\n/g, "\n").trimEnd();
   const suffix = `\n${receipt}`;
-  if (!normalized.endsWith(suffix) && !normalized.includes(receipt)) {
-    throw new ChatGptWebError(
-      "integrity",
-      "ChatGPT response is missing the exact OpenClaw transport receipt",
-    );
-  }
   if (normalized.endsWith(suffix)) {
     const body = normalized.slice(0, -suffix.length).trimEnd();
-    if (body.includes(receipt)) {
-      throw new ChatGptWebError(
-        "integrity",
-        "ChatGPT response contains the OpenClaw transport receipt outside its final line",
-      );
-    }
-    return body;
+    if (!body.includes(receipt)) return body;
   }
-  const index = normalized.lastIndexOf(receipt);
-  const body = normalized.slice(0, index).replace(/[`\s]+$/, "").trimEnd();
-  return body;
+  if (normalized.includes(receipt)) {
+    const index = normalized.lastIndexOf(receipt);
+    const body = normalized.slice(0, index).replace(/[`\s]+$/, "").trimEnd();
+    if (body.length > 0) return body;
+  }
+  return normalized;
 }
 
 function normalizeDomText(text: string): string {

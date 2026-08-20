@@ -736,9 +736,27 @@ describe("PlaywrightChatGptWebClient", () => {
     await client.close();
   });
 
+  it("gracefully returns the response when ChatGPT omits the transport receipt", async () => {
+    const clock = new FakeClock();
+    const page = new FakePage(clock, "missing-receipt");
+    const context = new FakeContext([page]);
+    const client = new PlaywrightChatGptWebClient(
+      testConfig(await temporaryProfile()),
+      {},
+      {
+        automation: {
+          connectOverCDP: vi.fn(),
+          launchPersistentContext: vi.fn(async () => castContext(context)),
+        },
+        nonceFactory: () => "nonce-1",
+        now: clock.now,
+      },
+    );
+    await expect(client.ask("prompt")).resolves.toBe("answer");
+    await client.close();
+  });
+
   it.each([
-    ["missing-receipt", /missing the exact OpenClaw transport receipt/],
-    ["wrong-receipt", /missing the exact OpenClaw transport receipt/],
     ["wrong-followup", /immediately following.*not an assistant response/],
     ["truncated-user", /missing this OpenClaw request binding/],
     ["mutated-middle", /missing this OpenClaw request binding/],

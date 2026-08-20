@@ -193,18 +193,21 @@ const DEFAULT_MODELS: ChatGptWebModelConfig[] = [
 
 const DEFAULT_SELECTORS: ChatGptWebSelectors = {
   composer:
-    'form[data-type="unified-composer"] #prompt-textarea[contenteditable="true"][role="textbox"], #prompt-textarea[contenteditable="true"][role="textbox"]',
+    'form[data-type="unified-composer"] #prompt-textarea[contenteditable="true"][role="textbox"], #prompt-textarea[contenteditable="true"][role="textbox"], #prompt-textarea, [contenteditable="true"][role="textbox"]',
   send:
-    'form[data-type="unified-composer"] button[data-testid="send-button"], form[data-type="unified-composer"] button[aria-label="Send prompt"]',
-  message: '[data-message-author-role][data-message-id]',
-  assistant: '[data-message-author-role="assistant"][data-message-id]',
-  user: '[data-message-author-role="user"][data-message-id]',
+    'form[data-type="unified-composer"] button[data-testid="send-button"], button[data-testid="send-button"], form[data-type="unified-composer"] button[aria-label="Send prompt"], button[aria-label="Send prompt"]',
+  message:
+    '[data-message-author-role], [data-message-id], article[data-testid*="conversation-turn"]',
+  assistant:
+    '[data-message-author-role="assistant"], article:has([data-message-author-role="assistant"])',
+  user:
+    '[data-message-author-role="user"], article:has([data-message-author-role="user"])',
   responseContent:
     '[data-message-content-part="final"], [data-message-content="final"], .markdown.prose, .markdown, .prose',
   completion:
     '[data-message-content-part="final"], [data-message-content="final"]',
   stop:
-    'form[data-type="unified-composer"] button[data-testid="stop-button"], form[data-type="unified-composer"] button[aria-label*="Stop"]',
+    'form[data-type="unified-composer"] button[data-testid="stop-button"], button[data-testid="stop-button"], form[data-type="unified-composer"] button[aria-label*="Stop"], button[aria-label*="Stop"]',
   modelPicker:
     'button[data-testid="model-switcher-dropdown-button"], button[aria-haspopup="menu"]:has-text("ChatGPT"), button[aria-label="Model selector"], button:has-text("ChatGPT")',
   modelOption:

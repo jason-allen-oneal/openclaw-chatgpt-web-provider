@@ -555,10 +555,12 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const hasValidDigest =
           submittedDigest === boundPromptDigest ||
           renderedDigest === requestDigest ||
-          (text.length > 500 && countOccurrences(normalizedActual, nonce) === 4);
+          (text.length > 2000 && countOccurrences(normalizedActual, nonce) >= 4);
+
+        const isUserRole = !role || role === "user";
 
         if (
-          role === "user" &&
+          isUserRole &&
           isValidPrefix &&
           countOccurrences(normalizedActual, requestMarker) === 1 &&
           countOccurrences(normalizedActual, contextStart) === 1 &&

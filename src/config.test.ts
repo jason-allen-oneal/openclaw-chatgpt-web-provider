@@ -105,7 +105,7 @@ describe("resolveChatGptWebConfig", () => {
 
   it("rejects numeric values outside their declared boundaries", () => {
     expect(() => resolveChatGptWebConfig({ maxPromptChars: 999 })).toThrow(
-      /between 1000 and 60000/,
+      /between 1000 and 300000/,
     );
     expect(() => resolveChatGptWebConfig({ responseTimeoutMs: 900_001 })).toThrow(
       /between 1000 and 900000/,

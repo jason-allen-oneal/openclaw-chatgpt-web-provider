@@ -9,9 +9,9 @@ import {
 
 describe("ChatGPT web token limits", () => {
   it("reserves the advertised output budget inside the advertised context window", () => {
-    expect(CHATGPT_WEB_CONTEXT_WINDOW).toBe(32_768);
-    expect(CHATGPT_WEB_MAX_TOKENS).toBe(8_192);
-    expect(CHATGPT_WEB_INPUT_TOKEN_BUDGET).toBe(24_576);
+    expect(CHATGPT_WEB_CONTEXT_WINDOW).toBe(128_000);
+    expect(CHATGPT_WEB_MAX_TOKENS).toBe(16_384);
+    expect(CHATGPT_WEB_INPUT_TOKEN_BUDGET).toBe(111_616);
   });
 
   it("uses UTF-8 bytes as a conservative token upper bound", () => {
@@ -20,14 +20,18 @@ describe("ChatGPT web token limits", () => {
     expect(estimateTokenUpperBound("😀")).toBe(4);
   });
 
-  it("never permits limits above the provider catalog", () => {
-    expect(resolveChatGptWebTurnLimits(100_000, 100_000)).toEqual({
-      contextWindow: CHATGPT_WEB_CONTEXT_WINDOW,
-      maxTokens: CHATGPT_WEB_MAX_TOKENS,
+  it("permits custom model limits within provider maximums", () => {
+    expect(resolveChatGptWebTurnLimits(300_000, 50_000)).toEqual({
+      contextWindow: 200_000,
+      maxTokens: 32_768,
     });
-    expect(resolveChatGptWebTurnLimits(16_384, 8_192)).toEqual({
-      contextWindow: 16_384,
+    expect(resolveChatGptWebTurnLimits(64_000, 8_192)).toEqual({
+      contextWindow: 64_000,
       maxTokens: 8_192,
+    });
+    expect(resolveChatGptWebTurnLimits()).toEqual({
+      contextWindow: 128_000,
+      maxTokens: 16_384,
     });
   });
 });

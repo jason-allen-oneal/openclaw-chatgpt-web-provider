@@ -25,6 +25,10 @@ export interface ChatGptWebModelConfig {
   webLabel?: string;
   /** Optional exact visible labels for the ChatGPT web reasoning picker. */
   reasoningOptions: Partial<Record<ModelThinkingLevel, string>>;
+  /** Context window override in tokens. Defaults to 128,000. */
+  contextWindow?: number;
+  /** Max output tokens. Defaults to 16,384. */
+  maxTokens?: number;
 }
 
 export interface ChatGptWebSelectors {
@@ -63,9 +67,68 @@ export const CHATGPT_WEB_DEFAULT_MODEL: ChatGptWebModelConfig = {
   name: "ChatGPT Web (backup)",
   reasoning: false,
   reasoningOptions: {},
+  contextWindow: 128_000,
+  maxTokens: 16_384,
 };
 
-const DEFAULT_MODELS: ChatGptWebModelConfig[] = [CHATGPT_WEB_DEFAULT_MODEL];
+export const CHATGPT_WEB_AUTO_MODEL: ChatGptWebModelConfig = {
+  id: "auto",
+  name: "ChatGPT Web (Auto)",
+  webLabel: "Auto",
+  reasoning: false,
+  reasoningOptions: {},
+  contextWindow: 128_000,
+  maxTokens: 16_384,
+};
+
+export const CHATGPT_WEB_GPT4O_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-4o",
+  name: "ChatGPT Web (GPT-4o)",
+  webLabel: "GPT-4o",
+  reasoning: false,
+  reasoningOptions: {},
+  contextWindow: 128_000,
+  maxTokens: 16_384,
+};
+
+export const CHATGPT_WEB_O3_MINI_MODEL: ChatGptWebModelConfig = {
+  id: "o3-mini",
+  name: "ChatGPT Web (o3-mini)",
+  webLabel: "o3-mini",
+  reasoning: true,
+  reasoningOptions: {
+    off: "Low",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+  },
+  contextWindow: 128_000,
+  maxTokens: 32_768,
+};
+
+export const CHATGPT_WEB_GPT5_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-5",
+  name: "ChatGPT Web (GPT-5)",
+  webLabel: "GPT-5",
+  reasoning: true,
+  reasoningOptions: {
+    off: "Auto",
+    low: "Quick",
+    medium: "Standard",
+    high: "Extended",
+    max: "Max",
+  },
+  contextWindow: 128_000,
+  maxTokens: 32_768,
+};
+
+const DEFAULT_MODELS: ChatGptWebModelConfig[] = [
+  CHATGPT_WEB_DEFAULT_MODEL,
+  CHATGPT_WEB_AUTO_MODEL,
+  CHATGPT_WEB_GPT4O_MODEL,
+  CHATGPT_WEB_O3_MINI_MODEL,
+  CHATGPT_WEB_GPT5_MODEL,
+];
 
 const DEFAULT_SELECTORS: ChatGptWebSelectors = {
   composer:
@@ -90,7 +153,7 @@ const DEFAULT_CONFIG: ChatGptWebConfig = {
   cdpUrl: "http://127.0.0.1:9222",
   sandboxMode: "default",
   headless: true,
-  maxPromptChars: 50_000,
+  maxPromptChars: 150_000,
   readyTimeoutMs: 30_000,
   responseTimeoutMs: 180_000,
   stabilityWindowMs: 1_500,
@@ -113,7 +176,7 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
       : {}),
     sandboxMode: raw.sandboxMode === "userns" ? "userns" : "default",
     headless: readHeadless(raw.headless),
-    maxPromptChars: readInteger(raw.maxPromptChars, DEFAULT_CONFIG.maxPromptChars, 1_000, 60_000),
+    maxPromptChars: readInteger(raw.maxPromptChars, DEFAULT_CONFIG.maxPromptChars, 1_000, 300_000),
     readyTimeoutMs: readInteger(
       raw.readyTimeoutMs,
       DEFAULT_CONFIG.readyTimeoutMs,
@@ -200,12 +263,17 @@ function readModels(value: unknown): ChatGptWebModelConfig[] {
       );
     }
 
+    const contextWindow = readOptionalInteger(record.contextWindow, 1_000, 200_000);
+    const maxTokens = readOptionalInteger(record.maxTokens, 1_000, 32_768);
+
     return {
       id,
       name: readString(record.name, `ChatGPT Web (${id})`),
       reasoning,
       ...(webLabel ? { webLabel } : {}),
       reasoningOptions,
+      ...(contextWindow ? { contextWindow } : {}),
+      ...(maxTokens ? { maxTokens } : {}),
     };
   });
 }
@@ -261,6 +329,18 @@ function readHeadless(value: unknown): true {
     );
   }
   return true;
+}
+
+function readOptionalInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < minimum || value > maximum) {
+    throw new Error(`Expected an integer between ${minimum} and ${maximum}`);
+  }
+  return value;
 }
 
 function readInteger(

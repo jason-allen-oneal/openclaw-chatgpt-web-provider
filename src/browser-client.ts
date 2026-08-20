@@ -38,12 +38,21 @@ export interface BrowserClientLogger {
   error?(message: string): void;
 }
 
+export type ChatGptWebStreamDelta =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string };
+
+export type ChatGptWebStreamHandler = (delta: ChatGptWebStreamDelta) => void;
+
 export interface ChatGptWebClient {
   ask(
     prompt: string,
     signal?: AbortSignal,
     controls?: ChatGptWebTurnControls,
+    onStreamDelta?: ChatGptWebStreamHandler,
   ): Promise<string>;
+  launchInteractiveLogin?(): Promise<void>;
+  checkAuthStatus?(): Promise<{ authenticated: boolean; error?: string }>;
 }
 
 export interface ChatGptWebTurnControls {
@@ -150,6 +159,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     prompt: string,
     signal?: AbortSignal,
     controls?: ChatGptWebTurnControls,
+    onStreamDelta?: ChatGptWebStreamHandler,
   ): Promise<string> {
     return await this.#enqueue(async () => {
       this.#assertOpen();
@@ -170,7 +180,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const boundary = installPageBoundaryGuards(page, this.#config.webchatUrl);
         try {
           return await Promise.race([
-            this.#runTurn(page, prompt, controller.signal, controls),
+            this.#runTurn(page, prompt, controller.signal, controls, onStreamDelta),
             boundary.violation,
           ]);
         } finally {
@@ -188,6 +198,14 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         if (this.#activeAbort === controller) this.#activeAbort = undefined;
       }
     });
+  }
+
+  async launchInteractiveLogin(): Promise<void> {
+    await launchInteractiveLogin(this.#config, this.#logger, this.#automation);
+  }
+
+  async checkAuthStatus(): Promise<{ authenticated: boolean; error?: string }> {
+    return await checkAuthStatus(this.#config, this.#automation);
   }
 
   close(): Promise<void> {
@@ -339,6 +357,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     prompt: string,
     signal: AbortSignal,
     controls?: ChatGptWebTurnControls,
+    onStreamDelta?: ChatGptWebStreamHandler,
   ): Promise<string> {
     const limits = resolveChatGptWebTurnLimits(
       controls?.limits?.contextWindow,
@@ -425,6 +444,8 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       submittedIndex,
       signal,
       limits.maxTokens,
+      onStreamDelta,
+      receipt,
     );
     assertExpectedOrigin(page.url(), this.#config.webchatUrl);
     const rawText = await extractResponseText(response, this.#config.selectors.responseContent);
@@ -533,9 +554,13 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     submittedIndex: number,
     signal: AbortSignal,
     maxOutputTokens: number,
+    onStreamDelta?: ChatGptWebStreamHandler,
+    receipt?: string,
   ): Promise<Locator> {
     const deadline = this.#now() + this.#config.responseTimeoutMs;
     let lastText = "";
+    let emittedTextLength = 0;
+    let emittedThinkingLength = 0;
     let stableSince = this.#now();
     let sawStop = false;
 
@@ -557,6 +582,19 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
           "The message immediately following the bound user turn is not an assistant response",
         );
       }
+
+      // Check for thinking / reasoning deltas
+      if (onStreamDelta) {
+        const thinkingText = await extractThinkingText(latest).catch(() => "");
+        if (thinkingText && thinkingText.length > emittedThinkingLength) {
+          const thinkingDelta = thinkingText.slice(emittedThinkingLength);
+          if (thinkingDelta) {
+            onStreamDelta({ kind: "thinking", text: thinkingDelta });
+            emittedThinkingLength = thinkingText.length;
+          }
+        }
+      }
+
       const text = await extractResponseText(
         latest,
         this.#config.selectors.responseContent,
@@ -581,6 +619,18 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       sawStop ||= stopVisible;
 
       if (text !== lastText) {
+        if (onStreamDelta && text.length > emittedTextLength) {
+          let visibleChunk = text.slice(emittedTextLength);
+          if (receipt && visibleChunk.includes(receipt)) {
+            visibleChunk = visibleChunk.slice(0, visibleChunk.indexOf(receipt));
+          } else if (visibleChunk.includes("OPENCLAW_RECEIPT")) {
+            visibleChunk = visibleChunk.slice(0, visibleChunk.indexOf("OPENCLAW_RECEIPT"));
+          }
+          if (visibleChunk) {
+            onStreamDelta({ kind: "text", text: visibleChunk });
+            emittedTextLength += visibleChunk.length;
+          }
+        }
         lastText = text;
         stableSince = this.#now();
       } else if (
@@ -1110,4 +1160,85 @@ function installPageBoundaryGuards(page: Page, expectedUrl: string): {
       page.off("framenavigated", onFrameNavigated);
     },
   };
+}
+
+async function extractThinkingText(locator: Locator): Promise<string> {
+  const thinkingLocator = locator.locator(
+    '[data-message-content="thought"], [data-testid="thought-content"], .thought-content, [data-message-content-part="thought"], .reasoning-content',
+  );
+  const count = await thinkingLocator.count().catch(() => 0);
+  if (count === 0) return "";
+  const chunks: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const text = await thinkingLocator.nth(i).innerText().catch(() => "");
+    if (text) chunks.push(text);
+  }
+  return chunks.join("\n");
+}
+
+export async function launchInteractiveLogin(
+  config: ChatGptWebConfig,
+  logger: BrowserClientLogger = {},
+  automation: BrowserAutomation = DEFAULT_AUTOMATION,
+): Promise<void> {
+  await prepareProfileDirectory(config.profileDir);
+  const executablePath =
+    config.executablePath ?? (await resolveChromiumExecutablePath());
+  logger.info?.(`Launching browser for ChatGPT login with profile at: ${config.profileDir}`);
+  const context = await automation.launchPersistentContext(config.profileDir, {
+    executablePath,
+    headless: false,
+    acceptDownloads: false,
+    args: [
+      ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
+      `--window-size=${HEADLESS_VIEWPORT.width},${HEADLESS_VIEWPORT.height}`,
+    ],
+  });
+
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(config.webchatUrl, { waitUntil: "domcontentloaded" });
+    logger.info?.("Browser window opened. Log in to ChatGPT and then close the browser window.");
+    await new Promise<void>((resolve) => {
+      context.once("close", () => resolve());
+    });
+  } finally {
+    await context.close().catch(() => undefined);
+  }
+}
+
+export async function checkAuthStatus(
+  config: ChatGptWebConfig,
+  automation: BrowserAutomation = DEFAULT_AUTOMATION,
+): Promise<{ authenticated: boolean; error?: string }> {
+  try {
+    await prepareProfileDirectory(config.profileDir);
+    const executablePath =
+      config.executablePath ?? (await resolveChromiumExecutablePath());
+    const context = await automation.launchPersistentContext(config.profileDir, {
+      executablePath,
+      headless: true,
+      acceptDownloads: false,
+      args: [
+        ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
+        "--headless=new",
+        "--disable-blink-features=AutomationControlled",
+      ],
+    });
+
+    try {
+      const page = await context.newPage();
+      await page.goto(config.webchatUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      const composer = page.locator(config.selectors.composer).first();
+      await composer.waitFor({ state: "visible", timeout: 15_000 });
+      return { authenticated: true };
+    } finally {
+      await context.close().catch(() => undefined);
+    }
+  } catch (error) {
+    return {
+      authenticated: false,
+      error: renderError(error),
+    };
+  }
 }

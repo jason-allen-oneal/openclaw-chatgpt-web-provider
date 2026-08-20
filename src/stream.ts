@@ -78,9 +78,94 @@ export function createChatGptWebStreamFn(params: {
           }
           const empty = buildMessage(model, [], "stop", estimateUsage(prompt, ""));
           stream.push({ type: "start", partial: empty });
-          // This browser transport is intentionally buffered: it emits one text
-          // delta only after the complete, positively terminated DOM response.
-          const text = await params.client.ask(prompt, options?.signal, controls);
+
+          let emittedText = "";
+          let emittedThinking = "";
+          let hasEmittedTextStart = false;
+          let hasEmittedThinkingStart = false;
+          let hasEmittedThinkingEnd = false;
+
+          const onStreamDelta = (delta: { kind: "text" | "thinking"; text: string }) => {
+            if (delta.kind === "thinking") {
+              if (!hasEmittedThinkingStart) {
+                const thinkingStarted = buildMessage(
+                  model,
+                  [{ type: "thinking", thinking: "" } as unknown as AssistantMessage["content"][0]],
+                  "stop",
+                  estimateUsage(prompt, ""),
+                );
+                stream.push({
+                  type: "thinking_start",
+                  contentIndex: 0,
+                  partial: thinkingStarted,
+                });
+                hasEmittedThinkingStart = true;
+              }
+              emittedThinking += delta.text;
+              const thinkingPartial = buildMessage(
+                model,
+                [
+                  {
+                    type: "thinking",
+                    thinking: emittedThinking,
+                  } as unknown as AssistantMessage["content"][0],
+                ],
+                "stop",
+                estimateUsage(prompt, ""),
+              );
+              stream.push({
+                type: "thinking_delta",
+                contentIndex: 0,
+                delta: delta.text,
+                partial: thinkingPartial,
+              });
+            } else if (delta.kind === "text") {
+              if (hasEmittedThinkingStart && !hasEmittedThinkingEnd) {
+                const thinkingEnded = buildMessage(
+                  model,
+                  [
+                    {
+                      type: "thinking",
+                      thinking: emittedThinking,
+                    } as unknown as AssistantMessage["content"][0],
+                  ],
+                  "stop",
+                  estimateUsage(prompt, ""),
+                );
+                stream.push({
+                  type: "thinking_end",
+                  contentIndex: 0,
+                  content: emittedThinking,
+                  partial: thinkingEnded,
+                });
+                hasEmittedThinkingEnd = true;
+              }
+              const textContentIndex = hasEmittedThinkingStart ? 1 : 0;
+              if (!hasEmittedTextStart) {
+                const textStarted = buildTextMessage(
+                  model,
+                  "",
+                  "stop",
+                  estimateUsage(prompt, ""),
+                  true,
+                );
+                stream.push({
+                  type: "text_start",
+                  contentIndex: textContentIndex,
+                  partial: textStarted,
+                });
+                hasEmittedTextStart = true;
+              }
+              emittedText += delta.text;
+              stream.push({
+                type: "text_delta",
+                contentIndex: textContentIndex,
+                delta: delta.text,
+              });
+            }
+          };
+
+          const text = await params.client.ask(prompt, options?.signal, controls, onStreamDelta);
           const estimatedOutputTokens = estimateTokenUpperBound(text);
           if (estimatedOutputTokens > limits.maxTokens) {
             throw new Error(
@@ -90,6 +175,28 @@ export function createChatGptWebStreamFn(params: {
           if (!text.trim()) {
             throw new Error("[chatgpt-web:empty_response] Browser transport returned no text");
           }
+
+          if (hasEmittedThinkingStart && !hasEmittedThinkingEnd) {
+            const thinkingEnded = buildMessage(
+              model,
+              [
+                {
+                  type: "thinking",
+                  thinking: emittedThinking,
+                } as unknown as AssistantMessage["content"][0],
+              ],
+              "stop",
+              estimateUsage(prompt, ""),
+            );
+            stream.push({
+              type: "thinking_end",
+              contentIndex: 0,
+              content: emittedThinking,
+              partial: thinkingEnded,
+            });
+            hasEmittedThinkingEnd = true;
+          }
+
           const toolCall = parseOpenClawToolCall(text, context.tools ?? []);
           if (toolCall) {
             const message = buildMessage(
@@ -115,19 +222,29 @@ export function createChatGptWebStreamFn(params: {
             return;
           }
 
+          const textContentIndex = hasEmittedThinkingStart ? 1 : 0;
           const message = buildTextMessage(model, text, "stop", estimateUsage(prompt, text));
-          const textStarted = buildTextMessage(
-            model,
-            "",
-            "stop",
-            estimateUsage(prompt, ""),
-            true,
-          );
-          stream.push({ type: "text_start", contentIndex: 0, partial: textStarted });
-          stream.push({ type: "text_delta", contentIndex: 0, delta: text });
+          if (!hasEmittedTextStart) {
+            const textStarted = buildTextMessage(
+              model,
+              "",
+              "stop",
+              estimateUsage(prompt, ""),
+              true,
+            );
+            stream.push({
+              type: "text_start",
+              contentIndex: textContentIndex,
+              partial: textStarted,
+            });
+            stream.push({ type: "text_delta", contentIndex: textContentIndex, delta: text });
+          } else if (text.length > emittedText.length) {
+            const remaining = text.slice(emittedText.length);
+            stream.push({ type: "text_delta", contentIndex: textContentIndex, delta: remaining });
+          }
           stream.push({
             type: "text_end",
-            contentIndex: 0,
+            contentIndex: textContentIndex,
             content: text,
             partial: message,
           });

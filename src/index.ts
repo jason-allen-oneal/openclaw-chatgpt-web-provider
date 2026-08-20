@@ -26,8 +26,8 @@ const CHATGPT_WEB_CATALOG_API = "openai-completions";
 
 const plugin: OpenClawPluginDefinition = definePluginEntry({
   id: CHATGPT_WEB_PROVIDER_ID,
-  name: "ChatGPT Web Backup Provider",
-  description: "Native-headless ChatGPT fallback provider pinned to OpenClaw 2026.8.1",
+  name: "ChatGPT Web Provider",
+  description: "Native-headless and browser-backed ChatGPT provider for OpenClaw 2026.8.1",
   register(api: OpenClawPluginApi) {
     const config = resolveChatGptWebConfig(api.pluginConfig);
     const catalogModels = config.models.map(toCatalogModel);
@@ -53,7 +53,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
 
     api.registerProvider({
       id: CHATGPT_WEB_PROVIDER_ID,
-      label: "ChatGPT Web (backup)",
+      label: "ChatGPT Web",
+      docsPath: "/providers/chatgpt-web",
       auth: [],
       catalog: {
         order: "late",
@@ -112,6 +113,80 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       classifyFailoverReason: ({ errorMessage }) =>
         classifyChatGptWebFailure(errorMessage),
     });
+
+    api.registerModelCatalogProvider?.({
+      provider: CHATGPT_WEB_PROVIDER_ID,
+      kinds: ["text"],
+      liveCatalog: async () => {
+        return catalogModels.map((m) => ({
+          kind: "text" as const,
+          provider: CHATGPT_WEB_PROVIDER_ID,
+          model: m.id,
+          label: m.name,
+          source: "configured" as const,
+        }));
+      },
+    });
+
+    api.registerCli?.(
+      async ({ program }) => {
+        const command = program
+          .command("chatgpt-web")
+          .description("Manage and authenticate the ChatGPT Web provider");
+
+        command
+          .command("login")
+          .description("Launch a visible browser window to log in to ChatGPT")
+          .action(async () => {
+            console.log(`Launching interactive login with profile directory: ${config.profileDir}`);
+            await browserClient.launchInteractiveLogin();
+            console.log("Interactive login session closed.");
+          });
+
+        command
+          .command("status")
+          .description("Check if ChatGPT session is authenticated in the browser profile")
+          .action(async () => {
+            console.log("Checking ChatGPT Web authentication status...");
+            const result = await browserClient.checkAuthStatus();
+            if (result.authenticated) {
+              console.log("✓ ChatGPT Web session is active and authenticated.");
+            } else {
+              console.log(`✗ ChatGPT Web is not ready: ${result.error ?? "Session not signed in"}`);
+              console.log("Run 'openclaw chatgpt-web login' to sign in.");
+            }
+          });
+      },
+      {
+        descriptors: [
+          {
+            name: "chatgpt-web",
+            description: "Manage and authenticate the ChatGPT Web provider",
+            hasSubcommands: true,
+          },
+        ],
+      },
+    );
+
+    api.registerCommand?.({
+      name: "chatgpt-web",
+      description: "Check status or trigger ChatGPT Web login helper.",
+      acceptsArgs: true,
+      handler: async (ctx) => {
+        const args = ctx.args?.trim();
+        if (args === "status") {
+          const result = await browserClient.checkAuthStatus();
+          return {
+            text: result.authenticated
+              ? "ChatGPT Web session is active and authenticated."
+              : `ChatGPT Web is not ready: ${result.error ?? "Session not signed in"}. Run 'openclaw chatgpt-web login' in terminal to log in.`,
+          };
+        }
+        return {
+          text: `ChatGPT Web provider is loaded. Available models: ${config.models.map((m) => m.id).join(", ")}. Run 'openclaw chatgpt-web login' to authenticate.`,
+        };
+      },
+    });
   },
 });
 
@@ -127,8 +202,8 @@ function toCatalogModel(modelConfig: ChatGptWebModelConfig) {
       : {}),
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: CHATGPT_WEB_CONTEXT_WINDOW,
-    maxTokens: CHATGPT_WEB_MAX_TOKENS,
+    contextWindow: modelConfig.contextWindow ?? CHATGPT_WEB_CONTEXT_WINDOW,
+    maxTokens: modelConfig.maxTokens ?? CHATGPT_WEB_MAX_TOKENS,
   };
 }
 

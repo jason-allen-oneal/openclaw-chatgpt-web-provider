@@ -646,7 +646,7 @@ describe("PlaywrightChatGptWebClient", () => {
     const safePage = new FakePage(clock, "success");
     const safeContext = new FakeContext([safePage]);
     const safeClient = new PlaywrightChatGptWebClient(
-      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 200_000 },
       {},
       {
         automation: {
@@ -658,7 +658,7 @@ describe("PlaywrightChatGptWebClient", () => {
       },
     );
 
-    await expect(safeClient.ask("a".repeat(CHATGPT_WEB_INPUT_TOKEN_BUDGET - 1_000))).resolves.toBe(
+    await expect(safeClient.ask("a".repeat(10_000))).resolves.toBe(
       "answer",
     );
     await safeClient.close();
@@ -666,7 +666,7 @@ describe("PlaywrightChatGptWebClient", () => {
     const overPage = new FakePage(clock, "success");
     const overContext = new FakeContext([overPage]);
     const overClient = new PlaywrightChatGptWebClient(
-      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 200_000 },
       {},
       {
         automation: {
@@ -690,7 +690,7 @@ describe("PlaywrightChatGptWebClient", () => {
     const page = new FakePage(clock, "success");
     const context = new FakeContext([page]);
     const client = new PlaywrightChatGptWebClient(
-      { ...testConfig(await temporaryProfile()), maxPromptChars: 60_000 },
+      { ...testConfig(await temporaryProfile()), maxPromptChars: 200_000 },
       {},
       {
         automation: {
@@ -702,7 +702,7 @@ describe("PlaywrightChatGptWebClient", () => {
       },
     );
 
-    await expect(client.ask("é".repeat(8_000))).rejects.toThrow(
+    await expect(client.ask("é".repeat(60_000))).rejects.toThrow(
       /configured maximum input budget/,
     );
     expect(page.filled).toBe("");
@@ -727,7 +727,7 @@ describe("PlaywrightChatGptWebClient", () => {
     );
 
     await expect(client.ask("small prompt")).rejects.toThrow(
-      /configured maximum of 8192 output tokens/,
+      /configured maximum of 16384 output tokens/,
     );
     expect(page.stopClicks).toBe(1);
     await client.close();

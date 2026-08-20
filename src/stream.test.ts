@@ -83,6 +83,7 @@ describe("createChatGptWebStreamFn", () => {
         reasoning: "high",
         limits: { contextWindow: 32_768, maxTokens: 8_192 },
       },
+      expect.any(Function),
     );
     expect(ask.mock.calls[0]?.[0]).toContain("Requested reasoning effort: high");
   });
@@ -314,5 +315,61 @@ describe("createChatGptWebStreamFn", () => {
       // Drain the protocol.
     }
     expect((await stream.result()).errorMessage).toMatch(/empty_response/);
+  });
+
+  it("streams incremental text deltas in real-time as they arrive", async () => {
+    const client: ChatGptWebClient = {
+      ask: vi.fn(async (_prompt, _signal, _controls, onStreamDelta) => {
+        onStreamDelta?.({ kind: "text", text: "Hello " });
+        onStreamDelta?.({ kind: "text", text: "world!" });
+        return "Hello world!";
+      }),
+    };
+    const stream = await createChatGptWebStreamFn({ client, maxPromptChars: 100_000 })(
+      model,
+      { messages: [{ role: "user", content: "hi", timestamp: 1 }] },
+    );
+    const events = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.map((e) => e.type)).toEqual([
+      "start",
+      "text_start",
+      "text_delta",
+      "text_delta",
+      "text_end",
+      "done",
+    ]);
+    expect(events[2]).toMatchObject({ type: "text_delta", delta: "Hello " });
+    expect(events[3]).toMatchObject({ type: "text_delta", delta: "world!" });
+    expect((await stream.result()).content).toEqual([{ type: "text", text: "Hello world!" }]);
+  });
+
+  it("streams thinking deltas before text deltas for reasoning models", async () => {
+    const client: ChatGptWebClient = {
+      ask: vi.fn(async (_prompt, _signal, _controls, onStreamDelta) => {
+        onStreamDelta?.({ kind: "thinking", text: "Let me think..." });
+        onStreamDelta?.({ kind: "text", text: "Here is the answer" });
+        return "Here is the answer";
+      }),
+    };
+    const stream = await createChatGptWebStreamFn({
+      client,
+      modelConfig: configuredModel,
+      maxPromptChars: 100_000,
+    })(model, { messages: [{ role: "user", content: "think", timestamp: 1 }] });
+    const events = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.map((e) => e.type)).toEqual([
+      "start",
+      "thinking_start",
+      "thinking_delta",
+      "thinking_end",
+      "text_start",
+      "text_delta",
+      "text_end",
+      "done",
+    ]);
   });
 });

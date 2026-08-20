@@ -7,8 +7,14 @@
  * than the real tokenizer would, but it cannot allow a request that is larger
  * than the declared context window.
  */
-export const CHATGPT_WEB_CONTEXT_WINDOW = 32_768;
-export const CHATGPT_WEB_MAX_TOKENS = 8_192;
+export const CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW = 128_000;
+export const CHATGPT_WEB_DEFAULT_MAX_TOKENS = 16_384;
+export const CHATGPT_WEB_MAX_CONTEXT_WINDOW = 200_000;
+export const CHATGPT_WEB_MAX_OUTPUT_TOKENS = 32_768;
+
+// Backward-compatible aliases
+export const CHATGPT_WEB_CONTEXT_WINDOW = CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW;
+export const CHATGPT_WEB_MAX_TOKENS = CHATGPT_WEB_DEFAULT_MAX_TOKENS;
 export const CHATGPT_WEB_INPUT_TOKEN_BUDGET =
   CHATGPT_WEB_CONTEXT_WINDOW - CHATGPT_WEB_MAX_TOKENS;
 
@@ -23,11 +29,15 @@ export function resolveChatGptWebTurnLimits(
 ): ChatGptWebTurnLimits {
   const resolvedContextWindow = clampPositiveInteger(
     contextWindow,
-    CHATGPT_WEB_CONTEXT_WINDOW,
-    CHATGPT_WEB_CONTEXT_WINDOW,
+    CHATGPT_WEB_DEFAULT_CONTEXT_WINDOW,
+    CHATGPT_WEB_MAX_CONTEXT_WINDOW,
   );
   const resolvedMaxTokens = Math.min(
-    clampPositiveInteger(maxTokens, CHATGPT_WEB_MAX_TOKENS, CHATGPT_WEB_MAX_TOKENS),
+    clampPositiveInteger(
+      maxTokens,
+      CHATGPT_WEB_DEFAULT_MAX_TOKENS,
+      CHATGPT_WEB_MAX_OUTPUT_TOKENS,
+    ),
     resolvedContextWindow,
   );
   return {
@@ -41,7 +51,11 @@ export function estimateTokenUpperBound(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function clampPositiveInteger(value: number | undefined, fallback: number, maximum: number): number {
+function clampPositiveInteger(
+  value: number | undefined,
+  fallback: number,
+  maximum: number,
+): number {
   if (value === undefined || !Number.isSafeInteger(value) || value <= 0) return fallback;
   return Math.min(value, maximum);
 }

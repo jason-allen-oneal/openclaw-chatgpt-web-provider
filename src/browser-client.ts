@@ -427,8 +427,6 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     const boundPrompt = [
       requestMarker,
       "",
-      "Read the single transport context below directly: letters and digits are literal; ␠ is space; ␊ is newline; fullwidth punctuation means its ASCII counterpart; ［uXXXX］ is an original UTF-16 code unit.",
-      "",
       contextStart,
       encodedPrompt,
       contextEnd,
@@ -557,7 +555,6 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const hasValidDigest =
           submittedDigest === boundPromptDigest ||
           renderedDigest === requestDigest ||
-          renderedLooseDigest === requestLooseDigest ||
           (text.length > 500 && countOccurrences(normalizedActual, nonce) === 4);
 
         if (
@@ -834,41 +831,11 @@ function canonicalizeBoundContext(value: string): string {
 }
 
 function canonicalizeTransportEnvelope(value: string): string {
-  // Chromium may expose contenteditable line breaks with slightly different
-  // whitespace around block nodes. The encoded context uses visible space and
-  // newline symbols, so collapsing only the envelope's ordinary whitespace
-  // cannot hide a context mutation or a textual prefix/suffix injection.
-  return value.replace(/\r\n/g, "\n").replace(/\s+/g, " ").trim();
+  return value.replace(/\r\n/g, "\n").trim();
 }
 
 function encodeTransportContext(value: string): string {
-  let encoded = "";
-  const normalized = value.replace(/\r\n/g, "\n");
-  for (let index = 0; index < normalized.length; index += 1) {
-    const codeUnit = normalized.charCodeAt(index);
-    if (
-      (codeUnit >= 0x30 && codeUnit <= 0x39) ||
-      (codeUnit >= 0x41 && codeUnit <= 0x5a) ||
-      (codeUnit >= 0x61 && codeUnit <= 0x7a)
-    ) {
-      encoded += normalized[index];
-      continue;
-    }
-    if (codeUnit === 0x20) {
-      encoded += "␠";
-      continue;
-    }
-    if (codeUnit === 0x0a) {
-      encoded += "␊";
-      continue;
-    }
-    if (codeUnit >= 0x21 && codeUnit <= 0x7e) {
-      encoded += String.fromCharCode(codeUnit + 0xfee0);
-      continue;
-    }
-    encoded += `［u${codeUnit.toString(16).padStart(4, "0")}］`;
-  }
-  return encoded;
+  return value.replace(/\r\n/g, "\n");
 }
 
 function extractBoundContext(text: string, startMarker: string, endMarker: string): string | undefined {

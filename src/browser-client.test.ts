@@ -140,7 +140,7 @@ class FakePage {
       this.plan === "mutated-middle"
         ? this.filled.replace("prompt", "tampered")
         : this.plan === "collapsed-space"
-          ? this.filled.replace("␠␠", "␠")
+          ? this.filled.replace("  ", " ")
           : this.plan === "extra-envelope"
             ? `injected prefix\n${this.filled}`
           : this.plan === "truncated-user"

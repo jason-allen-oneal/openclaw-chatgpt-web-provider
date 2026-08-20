@@ -121,12 +121,74 @@ export const CHATGPT_WEB_GPT5_MODEL: ChatGptWebModelConfig = {
   maxTokens: 32_768,
 };
 
+export const CHATGPT_WEB_GPT5_THINKING_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-5-thinking",
+  name: "ChatGPT Web (GPT-5 Thinking)",
+  webLabel: "GPT-5",
+  reasoning: true,
+  reasoningOptions: {
+    off: "Auto",
+    low: "Quick",
+    medium: "Standard",
+    high: "Extended",
+    max: "Max",
+  },
+  contextWindow: 128_000,
+  maxTokens: 32_768,
+};
+
+export const CHATGPT_WEB_GPT5_PRO_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-5-pro",
+  name: "ChatGPT Web (GPT-5 Pro)",
+  webLabel: "GPT-5 Pro",
+  reasoning: true,
+  reasoningOptions: {
+    off: "Auto",
+    low: "Quick",
+    medium: "Standard",
+    high: "Extended",
+    max: "Max",
+  },
+  contextWindow: 128_000,
+  maxTokens: 32_768,
+};
+
+export const CHATGPT_WEB_GPT5_5_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-5.5",
+  name: "ChatGPT Web (GPT-5.5)",
+  webLabel: "GPT-5.5",
+  reasoning: true,
+  reasoningOptions: {
+    off: "Auto",
+    low: "Quick",
+    medium: "Standard",
+    high: "Extended",
+    max: "Max",
+  },
+  contextWindow: 128_000,
+  maxTokens: 32_768,
+};
+
+export const CHATGPT_WEB_GPT5_5_MINI_MODEL: ChatGptWebModelConfig = {
+  id: "gpt-5.5-mini",
+  name: "ChatGPT Web (GPT-5.5 mini)",
+  webLabel: "GPT-5.5 mini",
+  reasoning: false,
+  reasoningOptions: {},
+  contextWindow: 128_000,
+  maxTokens: 16_384,
+};
+
 const DEFAULT_MODELS: ChatGptWebModelConfig[] = [
   CHATGPT_WEB_DEFAULT_MODEL,
   CHATGPT_WEB_AUTO_MODEL,
+  CHATGPT_WEB_GPT5_MODEL,
+  CHATGPT_WEB_GPT5_THINKING_MODEL,
+  CHATGPT_WEB_GPT5_PRO_MODEL,
+  CHATGPT_WEB_GPT5_5_MODEL,
+  CHATGPT_WEB_GPT5_5_MINI_MODEL,
   CHATGPT_WEB_GPT4O_MODEL,
   CHATGPT_WEB_O3_MINI_MODEL,
-  CHATGPT_WEB_GPT5_MODEL,
 ];
 
 const DEFAULT_SELECTORS: ChatGptWebSelectors = {

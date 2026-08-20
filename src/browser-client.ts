@@ -390,7 +390,17 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     const composer = page.locator(this.#config.selectors.composer).first();
     try {
       await composer.waitFor({ state: "visible", timeout: this.#config.readyTimeoutMs });
+      const loginButton = page
+        .locator('[data-testid="login-button"], button:has-text("Log in"), a[href*="/login"]')
+        .first();
+      if (await loginButton.isVisible().catch(() => false)) {
+        throw new ChatGptWebError(
+          "auth",
+          `ChatGPT session is in guest mode (not signed in). Run 'openclaw chatgpt-web login' to sign in to your ChatGPT account.`,
+        );
+      }
     } catch (error) {
+      if (error instanceof ChatGptWebError) throw error;
       throw new ChatGptWebError(
         "auth",
         `ChatGPT is not ready in the dedicated browser profile. Sign in at ${this.#config.webchatUrl}, then restart OpenClaw.`,
@@ -1283,6 +1293,16 @@ export async function checkAuthStatus(
       await page.goto(config.webchatUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
       const composer = page.locator(config.selectors.composer).first();
       await composer.waitFor({ state: "visible", timeout: 15_000 });
+      const loginButton = page
+        .locator('[data-testid="login-button"], button:has-text("Log in"), a[href*="/login"]')
+        .first();
+      if (await loginButton.isVisible().catch(() => false)) {
+        return {
+          authenticated: false,
+          error:
+            "ChatGPT session is in guest mode (not signed in). Run 'openclaw chatgpt-web login' to complete login.",
+        };
+      }
       return { authenticated: true };
     } finally {
       await context.close().catch(() => undefined);

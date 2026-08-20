@@ -40,10 +40,10 @@ export interface ChatGptWebSelectors {
   responseContent: string;
   completion: string;
   stop: string;
-  modelPicker?: string;
-  modelOption?: string;
-  reasoningPicker?: string;
-  reasoningOption?: string;
+  modelPicker?: string | undefined;
+  modelOption?: string | undefined;
+  reasoningPicker?: string | undefined;
+  reasoningOption?: string | undefined;
 }
 
 export interface ChatGptWebConfig {
@@ -277,18 +277,12 @@ export function resolveChatGptWebConfig(value: unknown): ChatGptWebConfig {
       ),
       completion: readString(selectors.completion, DEFAULT_SELECTORS.completion),
       stop: readString(selectors.stop, DEFAULT_SELECTORS.stop),
-      ...(readOptionalString(selectors.modelPicker)
-        ? { modelPicker: readOptionalString(selectors.modelPicker)! }
-        : {}),
-      ...(readOptionalString(selectors.modelOption)
-        ? { modelOption: readOptionalString(selectors.modelOption)! }
-        : {}),
-      ...(readOptionalString(selectors.reasoningPicker)
-        ? { reasoningPicker: readOptionalString(selectors.reasoningPicker)! }
-        : {}),
-      ...(readOptionalString(selectors.reasoningOption)
-        ? { reasoningOption: readOptionalString(selectors.reasoningOption)! }
-        : {}),
+      modelPicker: readOptionalString(selectors.modelPicker) ?? DEFAULT_SELECTORS.modelPicker,
+      modelOption: readOptionalString(selectors.modelOption) ?? DEFAULT_SELECTORS.modelOption,
+      reasoningPicker:
+        readOptionalString(selectors.reasoningPicker) ?? DEFAULT_SELECTORS.reasoningPicker,
+      reasoningOption:
+        readOptionalString(selectors.reasoningOption) ?? DEFAULT_SELECTORS.reasoningOption,
     },
   };
 }

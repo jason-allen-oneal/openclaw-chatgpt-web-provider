@@ -489,8 +489,17 @@ describe("PlaywrightChatGptWebClient", () => {
     const clock = new FakeClock();
     const page = new FakePage(clock, "success");
     const context = new FakeContext([page]);
+    const base = testConfig(await temporaryProfile());
+    const config = {
+      ...base,
+      selectors: {
+        ...base.selectors,
+        modelPicker: undefined,
+        modelOption: undefined,
+      },
+    };
     const client = new PlaywrightChatGptWebClient(
-      testConfig(await temporaryProfile()),
+      config,
       {},
       {
         automation: {
@@ -521,8 +530,17 @@ describe("PlaywrightChatGptWebClient", () => {
     const clock = new FakeClock();
     const page = new FakePage(clock, "success");
     const context = new FakeContext([page]);
+    const base = testConfig(await temporaryProfile());
+    const config = {
+      ...base,
+      selectors: {
+        ...base.selectors,
+        reasoningPicker: undefined,
+        reasoningOption: undefined,
+      },
+    };
     const client = new PlaywrightChatGptWebClient(
-      testConfig(await temporaryProfile()),
+      config,
       {},
       {
         automation: {

@@ -536,6 +536,10 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const role = await submitted.getAttribute("data-message-author-role").catch(() => null);
         const text = await submitted.innerText().catch(() => "");
         const normalizedActual = normalizeDomText(text);
+        if (normalizedActual.trim() === "" || countOccurrences(normalizedActual, requestMarker) === 0) {
+          await page.waitForTimeout(100);
+          continue;
+        }
         const nonce = receipt.replace(/^OPENCLAW_RECEIPT:/, "");
         const submittedDigest = createHash("sha256")
           .update(canonicalizeTransportEnvelope(text))

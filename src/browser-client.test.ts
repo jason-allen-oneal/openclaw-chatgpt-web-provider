@@ -777,7 +777,10 @@ describe("PlaywrightChatGptWebClient", () => {
 
   it.each([
     ["wrong-followup", /immediately following.*not an assistant response/],
-    ["truncated-user", /missing this OpenClaw request binding/],
+    [
+      "truncated-user",
+      /(?:missing this OpenClaw request binding|did not expose a matching submitted-turn receipt)/,
+    ],
     ["mutated-middle", /missing this OpenClaw request binding/],
     ["collapsed-space", /missing this OpenClaw request binding/],
     ["extra-envelope", /missing this OpenClaw request binding/],

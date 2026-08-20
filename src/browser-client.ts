@@ -1017,6 +1017,14 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
+const ALLOWED_CHATGPT_ORIGINS = new Set([
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  "https://auth.openai.com",
+  "https://auth0.openai.com",
+  "https://openai.com",
+]);
+
 function assertExpectedOrigin(actual: string, configured: string): void {
   if (!actual || actual === "about:blank" || actual.startsWith("about:")) return;
   let actualOrigin: string;
@@ -1025,11 +1033,11 @@ function assertExpectedOrigin(actual: string, configured: string): void {
   } catch (error) {
     throw new ChatGptWebError("navigation", "Browser navigated to an invalid URL", error);
   }
-  const expectedOrigin = new URL(configured).origin;
-  if (actualOrigin !== expectedOrigin) {
+  const configuredOrigin = new URL(configured).origin;
+  if (actualOrigin !== configuredOrigin && !ALLOWED_CHATGPT_ORIGINS.has(actualOrigin)) {
     throw new ChatGptWebError(
       "navigation",
-      `Browser left the configured ChatGPT origin (${expectedOrigin}) before prompt submission`,
+      `Browser left the configured ChatGPT origin (${configuredOrigin}) before prompt submission; actual="${actual}"`,
     );
   }
 }
@@ -1177,8 +1185,10 @@ function installPageBoundaryGuards(page: Page, expectedUrl: string): {
   const onFrameNavigated = (frame: Frame) => {
     if (frame.parentFrame() !== null) return;
     const url = frame.url();
-    if (!url || url === "about:blank" || url.startsWith("about:")) return;
+    if (!url || url.startsWith("about:") || url.startsWith("blob:") || url.startsWith("data:")) return;
     try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
       assertExpectedOrigin(url, expectedUrl);
     } catch (error) {
       rejectOnce(renderError(error));

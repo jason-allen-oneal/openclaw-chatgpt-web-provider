@@ -292,6 +292,8 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       ? buildNativeHeadlessOptions(await this.#resolveExecutableVersion(executablePath))
       : {};
     const args = [
+      "--password-store=basic",
+      "--use-mock-keychain",
       ...(this.#config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
       ...(this.#config.headless
         ? [
@@ -1245,6 +1247,8 @@ export async function launchInteractiveLogin(
   // This ensures Google OAuth ("This browser or app may not be secure") and Cloudflare Turnstile CAPTCHAs pass normally.
   const args = [
     `--user-data-dir=${config.profileDir}`,
+    "--password-store=basic",
+    "--use-mock-keychain",
     "--no-first-run",
     "--no-default-browser-check",
     config.webchatUrl,
@@ -1275,6 +1279,8 @@ export async function checkAuthStatus(
       userAgent: DEFAULT_USER_AGENT,
       viewport: HEADLESS_VIEWPORT,
       args: [
+        "--password-store=basic",
+        "--use-mock-keychain",
         ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
         ...(config.headless
           ? [

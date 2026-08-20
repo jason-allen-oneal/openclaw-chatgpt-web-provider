@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   access,
   chmod,
@@ -69,6 +69,7 @@ export interface BrowserAutomation {
       executablePath: string;
       headless: boolean;
       acceptDownloads: false;
+      ignoreDefaultArgs?: string[] | boolean;
       args?: string[];
       viewport?: { width: number; height: number };
       screen?: { width: number; height: number };
@@ -294,6 +295,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         executablePath,
         headless: this.#config.headless,
         acceptDownloads: false,
+        ignoreDefaultArgs: ["--enable-automation"],
         ...(args.length > 0 ? { args } : {}),
         ...headlessOptions,
       },
@@ -1179,32 +1181,29 @@ async function extractThinkingText(locator: Locator): Promise<string> {
 export async function launchInteractiveLogin(
   config: ChatGptWebConfig,
   logger: BrowserClientLogger = {},
-  automation: BrowserAutomation = DEFAULT_AUTOMATION,
+  _automation: BrowserAutomation = DEFAULT_AUTOMATION,
 ): Promise<void> {
   await prepareProfileDirectory(config.profileDir);
   const executablePath =
     config.executablePath ?? (await resolveChromiumExecutablePath());
   logger.info?.(`Launching browser for ChatGPT login with profile at: ${config.profileDir}`);
-  const context = await automation.launchPersistentContext(config.profileDir, {
-    executablePath,
-    headless: false,
-    acceptDownloads: false,
-    args: [
-      ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
-      `--window-size=${HEADLESS_VIEWPORT.width},${HEADLESS_VIEWPORT.height}`,
-    ],
-  });
 
-  try {
-    const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(config.webchatUrl, { waitUntil: "domcontentloaded" });
-    logger.info?.("Browser window opened. Log in to ChatGPT and then close the browser window.");
-    await new Promise<void>((resolve) => {
-      context.once("close", () => resolve());
+  // Launch genuine Google Chrome as a standard desktop process without any automation flags.
+  // This ensures Google OAuth ("This browser or app may not be secure") and Cloudflare Turnstile CAPTCHAs pass normally.
+  const args = [
+    `--user-data-dir=${config.profileDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    config.webchatUrl,
+  ];
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executablePath, args, {
+      stdio: "inherit",
     });
-  } finally {
-    await context.close().catch(() => undefined);
-  }
+    child.on("error", (err) => reject(err));
+    child.on("exit", () => resolve());
+  });
 }
 
 export async function checkAuthStatus(
@@ -1219,6 +1218,7 @@ export async function checkAuthStatus(
       executablePath,
       headless: true,
       acceptDownloads: false,
+      ignoreDefaultArgs: ["--enable-automation"],
       args: [
         ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
         "--headless=new",

@@ -409,6 +409,9 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     const contextStart = `OPENCLAW_CONTEXT_BEGIN:${nonce}`;
     const contextEnd = `OPENCLAW_CONTEXT_END:${nonce}`;
     const receipt = `OPENCLAW_RECEIPT:${nonce}`;
+    const requestLooseDigest = createHash("sha256")
+      .update(canonicalizeTransportEnvelope(encodedPrompt))
+      .digest("hex");
     const boundPrompt = [
       requestMarker,
       "",
@@ -448,6 +451,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       beforeMessageCount,
       requestMarker,
       requestDigest,
+      requestLooseDigest,
       boundPromptDigest,
       contextStart,
       contextEnd,
@@ -505,6 +509,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
     beforeMessageCount: number,
     requestMarker: string,
     requestDigest: string,
+    requestLooseDigest: string,
     boundPromptDigest: string,
     contextStart: string,
     contextEnd: string,
@@ -528,15 +533,21 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const renderedDigest = createHash("sha256")
           .update(canonicalizeBoundContext(renderedContext ?? ""))
           .digest("hex");
+        const renderedLooseDigest = createHash("sha256")
+          .update(canonicalizeTransportEnvelope(renderedContext ?? ""))
+          .digest("hex");
+        const startsWithMarker = normalizedActual.startsWith(normalizeDomText(requestMarker));
         if (
           role === "user" &&
+          startsWithMarker &&
           countOccurrences(normalizedActual, requestMarker) === 1 &&
           countOccurrences(normalizedActual, contextStart) === 1 &&
           countOccurrences(normalizedActual, contextEnd) === 1 &&
           countOccurrences(normalizedActual, receipt) === 1 &&
           renderedContext !== undefined &&
-          renderedDigest === requestDigest &&
-          submittedDigest === boundPromptDigest
+          (renderedDigest === requestDigest ||
+            renderedLooseDigest === requestLooseDigest ||
+            submittedDigest === boundPromptDigest)
         ) {
           return beforeMessageCount;
         }

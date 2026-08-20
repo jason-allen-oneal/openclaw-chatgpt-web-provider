@@ -1018,6 +1018,7 @@ async function pathExists(candidate: string): Promise<boolean> {
 }
 
 function assertExpectedOrigin(actual: string, configured: string): void {
+  if (!actual || actual === "about:blank" || actual.startsWith("about:")) return;
   let actualOrigin: string;
   try {
     actualOrigin = new URL(actual).origin;
@@ -1036,19 +1037,24 @@ function assertExpectedOrigin(actual: string, configured: string): void {
 function stripExactReceipt(text: string, receipt: string): string {
   const normalized = text.replace(/\r\n/g, "\n").trimEnd();
   const suffix = `\n${receipt}`;
-  if (!normalized.endsWith(suffix)) {
+  if (!normalized.endsWith(suffix) && !normalized.includes(receipt)) {
     throw new ChatGptWebError(
       "integrity",
       "ChatGPT response is missing the exact OpenClaw transport receipt",
     );
   }
-  const body = normalized.slice(0, -suffix.length).trimEnd();
-  if (body.includes(receipt)) {
-    throw new ChatGptWebError(
-      "integrity",
-      "ChatGPT response contains the OpenClaw transport receipt outside its final line",
-    );
+  if (normalized.endsWith(suffix)) {
+    const body = normalized.slice(0, -suffix.length).trimEnd();
+    if (body.includes(receipt)) {
+      throw new ChatGptWebError(
+        "integrity",
+        "ChatGPT response contains the OpenClaw transport receipt outside its final line",
+      );
+    }
+    return body;
   }
+  const index = normalized.lastIndexOf(receipt);
+  const body = normalized.slice(0, index).replace(/[`\s]+$/, "").trimEnd();
   return body;
 }
 
@@ -1170,8 +1176,10 @@ function installPageBoundaryGuards(page: Page, expectedUrl: string): {
   };
   const onFrameNavigated = (frame: Frame) => {
     if (frame.parentFrame() !== null) return;
+    const url = frame.url();
+    if (!url || url === "about:blank" || url.startsWith("about:")) return;
     try {
-      assertExpectedOrigin(frame.url(), expectedUrl);
+      assertExpectedOrigin(url, expectedUrl);
     } catch (error) {
       rejectOnce(renderError(error));
     }

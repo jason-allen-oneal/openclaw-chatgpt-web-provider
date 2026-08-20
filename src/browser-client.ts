@@ -538,6 +538,7 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const role = await submitted.getAttribute("data-message-author-role").catch(() => null);
         const text = await submitted.innerText().catch(() => "");
         const normalizedActual = normalizeDomText(text);
+        const nonce = receipt.replace(/^OPENCLAW_RECEIPT:/, "");
         const submittedDigest = createHash("sha256")
           .update(canonicalizeTransportEnvelope(text))
           .digest("hex");
@@ -548,18 +549,26 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         const renderedLooseDigest = createHash("sha256")
           .update(canonicalizeTransportEnvelope(renderedContext ?? ""))
           .digest("hex");
-        const startsWithMarker = normalizedActual.startsWith(normalizeDomText(requestMarker));
+        const markerIndex = normalizedActual.indexOf(normalizeDomText(requestMarker));
+        const prefix = markerIndex >= 0 ? normalizedActual.slice(0, markerIndex).trim().toLowerCase() : "";
+        const isValidPrefix =
+          prefix === "" || prefix === "you" || prefix === "you said" || prefix.startsWith("you");
+
+        const hasValidDigest =
+          submittedDigest === boundPromptDigest ||
+          renderedDigest === requestDigest ||
+          renderedLooseDigest === requestLooseDigest ||
+          (text.length > 500 && countOccurrences(normalizedActual, nonce) === 4);
+
         if (
           role === "user" &&
-          startsWithMarker &&
+          isValidPrefix &&
           countOccurrences(normalizedActual, requestMarker) === 1 &&
           countOccurrences(normalizedActual, contextStart) === 1 &&
           countOccurrences(normalizedActual, contextEnd) === 1 &&
           countOccurrences(normalizedActual, receipt) === 1 &&
           renderedContext !== undefined &&
-          (renderedDigest === requestDigest ||
-            renderedLooseDigest === requestLooseDigest ||
-            submittedDigest === boundPromptDigest)
+          hasValidDigest
         ) {
           return beforeMessageCount;
         }

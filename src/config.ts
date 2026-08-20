@@ -205,6 +205,14 @@ const DEFAULT_SELECTORS: ChatGptWebSelectors = {
     '[data-message-content-part="final"], [data-message-content="final"]',
   stop:
     'form[data-type="unified-composer"] button[data-testid="stop-button"], form[data-type="unified-composer"] button[aria-label*="Stop"]',
+  modelPicker:
+    'button[data-testid="model-switcher-dropdown-button"], button[aria-haspopup="menu"]:has-text("ChatGPT"), button[aria-label="Model selector"], button:has-text("ChatGPT")',
+  modelOption:
+    '[role="menuitem"]:has-text("{{label}}"), div[role="menuitem"]:has-text("{{label}}"), button:has-text("{{label}}"), [role="menuitem"]',
+  reasoningPicker:
+    'button[data-testid="reasoning-effort-button"], button[aria-label*="Thinking"], button[aria-label*="Reasoning"]',
+  reasoningOption:
+    '[role="menuitem"]:has-text("{{label}}"), button:has-text("{{label}}"), [role="menuitem"]',
 };
 
 const DEFAULT_CONFIG: ChatGptWebConfig = {

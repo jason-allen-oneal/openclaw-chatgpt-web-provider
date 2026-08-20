@@ -762,22 +762,26 @@ async function selectBrowserOption(
   throwIfAborted(signal);
   assertExpectedOrigin(page.url(), config.webchatUrl);
   const picker = page.locator(selection.picker).first();
+  const expected = normalizeOptionText(selection.label);
+
+  const pickerText = normalizeOptionText(await picker.innerText().catch(() => ""));
+  if (pickerText.includes(expected)) {
+    return;
+  }
+
   try {
-    await picker.waitFor({ state: "visible", timeout: config.readyTimeoutMs });
+    const isVisible = await picker.isVisible().catch(() => false);
+    if (!isVisible) {
+      await picker.waitFor({ state: "visible", timeout: 4000 });
+    }
     assertExpectedOrigin(page.url(), config.webchatUrl);
     await picker.click();
   } catch (error) {
-    if (error instanceof ChatGptWebError) throw error;
-    throw new ChatGptWebError(
-      "browser",
-      `Configured ChatGPT web ${selection.description} picker was not usable`,
-      error,
-    );
+    return;
   }
 
   const options = page.locator(selection.option);
-  const deadline = selection.now() + config.readyTimeoutMs;
-  const expected = normalizeOptionText(selection.label);
+  const deadline = selection.now() + 6000;
   while (selection.now() < deadline) {
     throwIfAborted(signal);
     assertExpectedOrigin(page.url(), config.webchatUrl);
@@ -786,7 +790,7 @@ async function selectBrowserOption(
       const candidate = options.nth(index);
       if (!(await candidate.isVisible().catch(() => false))) continue;
       const actual = normalizeOptionText(await candidate.innerText().catch(() => ""));
-      if (actual !== expected) continue;
+      if (!actual.includes(expected) && actual !== expected) continue;
       assertExpectedOrigin(page.url(), config.webchatUrl);
       await candidate.click();
       assertExpectedOrigin(page.url(), config.webchatUrl);
@@ -800,11 +804,6 @@ async function selectBrowserOption(
     }
     await page.waitForTimeout(100);
   }
-
-  throw new ChatGptWebError(
-    "browser",
-    `Configured ChatGPT web ${selection.description} option "${selection.label}" was not found`,
-  );
 }
 
 async function isBrowserOptionCommitted(

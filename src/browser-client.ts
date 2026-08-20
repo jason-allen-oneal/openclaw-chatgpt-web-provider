@@ -1252,7 +1252,7 @@ export async function launchInteractiveLogin(
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(executablePath, args, {
-      stdio: "inherit",
+      stdio: "ignore",
     });
     child.on("error", (err) => reject(err));
     child.on("exit", () => resolve());

@@ -681,7 +681,6 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
       } else if (
         text &&
         !stopVisible &&
-        (sawStop || completionVisible) &&
         this.#now() - stableSince >= this.#config.stabilityWindowMs
       ) {
         return latest;

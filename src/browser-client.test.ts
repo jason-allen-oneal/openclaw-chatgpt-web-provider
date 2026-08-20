@@ -260,7 +260,8 @@ class FakeLocator {
     if (this.kind === "completion") {
       return this.page.messages[this.index ?? -1]?.completion === true;
     }
-    if (this.kind === "stop" || this.kind === "login") return false;
+    if (this.kind === "stop") return this.page.plan === "long-pause";
+    if (this.kind === "login") return false;
     if (this.kind === "send" && this.page.redirectWhileWaitingForSend) {
       this.page.sendVisibilityChecks += 1;
       if (this.page.sendVisibilityChecks === 1) {

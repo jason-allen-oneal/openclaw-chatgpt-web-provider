@@ -108,11 +108,23 @@ const DEFAULT_AUTOMATION: BrowserAutomation = {
 };
 
 const HEADLESS_VIEWPORT = { width: 1440, height: 1000 } as const;
+const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const HEADLESS_COMPATIBILITY_INIT_SCRIPT = `
 Object.defineProperty(Navigator.prototype, "webdriver", {
   configurable: true,
   get: () => undefined,
 });
+Object.defineProperty(navigator, "webdriver", {
+  configurable: true,
+  get: () => undefined,
+});
+window.chrome = {
+  runtime: {},
+  app: {},
+  loadTimes: () => {},
+  csi: () => {},
+};
 Object.defineProperty(Navigator.prototype, "languages", {
   configurable: true,
   get: () => ["en-US", "en"],
@@ -296,6 +308,8 @@ export class PlaywrightChatGptWebClient implements ChatGptWebClient {
         headless: this.#config.headless,
         acceptDownloads: false,
         ignoreDefaultArgs: ["--enable-automation"],
+        userAgent: DEFAULT_USER_AGENT,
+        viewport: HEADLESS_VIEWPORT,
         ...(args.length > 0 ? { args } : {}),
         ...headlessOptions,
       },
@@ -1216,17 +1230,26 @@ export async function checkAuthStatus(
       config.executablePath ?? (await resolveChromiumExecutablePath());
     const context = await automation.launchPersistentContext(config.profileDir, {
       executablePath,
-      headless: true,
+      headless: config.headless,
       acceptDownloads: false,
       ignoreDefaultArgs: ["--enable-automation"],
+      userAgent: DEFAULT_USER_AGENT,
+      viewport: HEADLESS_VIEWPORT,
       args: [
         ...(config.sandboxMode === "userns" ? ["--disable-setuid-sandbox"] : []),
-        "--headless=new",
-        "--disable-blink-features=AutomationControlled",
+        ...(config.headless
+          ? [
+              "--headless=new",
+              "--disable-blink-features=AutomationControlled",
+            ]
+          : []),
       ],
     });
 
     try {
+      if (config.headless) {
+        await context.addInitScript(HEADLESS_COMPATIBILITY_INIT_SCRIPT);
+      }
       const page = await context.newPage();
       await page.goto(config.webchatUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
       const composer = page.locator(config.selectors.composer).first();

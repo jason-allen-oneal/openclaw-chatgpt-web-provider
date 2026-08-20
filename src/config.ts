@@ -322,13 +322,8 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function readHeadless(value: unknown): true {
-  if (value === false) {
-    throw new Error(
-      "headless must be true; provider turns never launch a visible browser window",
-    );
-  }
-  return true;
+function readHeadless(value: unknown): boolean {
+  return readBoolean(value, true);
 }
 
 function readOptionalInteger(

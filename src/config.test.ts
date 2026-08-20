@@ -97,10 +97,9 @@ describe("resolveChatGptWebConfig", () => {
     );
   });
 
-  it("rejects visible provider turns", () => {
-    expect(() => resolveChatGptWebConfig({ headless: false })).toThrow(
-      /headless must be true/,
-    );
+  it("accepts configurable headless flag", () => {
+    expect(resolveChatGptWebConfig({ headless: false }).headless).toBe(false);
+    expect(resolveChatGptWebConfig({ headless: true }).headless).toBe(true);
   });
 
   it("rejects numeric values outside their declared boundaries", () => {

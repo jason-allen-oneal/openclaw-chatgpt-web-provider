@@ -74,7 +74,6 @@ export const CHATGPT_WEB_DEFAULT_MODEL: ChatGptWebModelConfig = {
 export const CHATGPT_WEB_AUTO_MODEL: ChatGptWebModelConfig = {
   id: "auto",
   name: "ChatGPT Web (Auto)",
-  webLabel: "Auto",
   reasoning: false,
   reasoningOptions: {},
   contextWindow: 128_000,
